@@ -1,46 +1,60 @@
 % ---------------- Cover page (Annexure 1) -------------------------
-% All text bold, 13 pt; project title 14 pt, as in the specimen.
+% Content as in the Annexure 1 specimen; layout and double border follow the
+% design of the project synopsis.
 \begin{titlepage}
-\newgeometry{left=1.25in,right=1.0in,top=0.8in,bottom=0.7in}
+\newgeometry{left=1in,right=1in,top=1in,bottom=0.9in}
 \centering
-\fontsize{13}{16}\selectfont\bfseries
-\setstretch{1.05}
+\thispagestyle{empty}
 
-A\\[2pt]
-Project Report\\[2pt]
-on\\[12pt]
+% --- Double border frame ---
+\begin{tikzpicture}[remember picture, overlay]
+  \draw[line width=1.5pt]
+    ([xshift=1.2cm, yshift=-1.2cm]current page.north west)
+    rectangle ([xshift=-1.2cm, yshift=1.2cm]current page.south east);
+  \draw[line width=0.5pt]
+    ([xshift=1.35cm, yshift=-1.35cm]current page.north west)
+    rectangle ([xshift=-1.35cm, yshift=1.35cm]current page.south east);
+\end{tikzpicture}
 
-{\fontsize{14}{18}\selectfont \ProjectTitleCaps\par}
-\vspace{14pt}
+\setstretch{1.0}
+\vspace*{-0.2cm}
+{\large A}\\[2pt]
+{\large Project Report on}\\[10pt]
 
-Submitted in partial fulfillment of the requirements\\
-for the award of the degree of\\[8pt]
-Bachelor of Technology\\[2pt]
-in\\[2pt]
-Computer Science and Engineering-Artificial Intelligence\\[6pt]
-Batch: \Batch\\[12pt]
+{\LARGE\bfseries VeriScript: A Hybrid Heuristic-Transformer\\[4pt]
+ System for AI-Generated Text Detection\par}
+\vspace{16pt}
 
-by\\[6pt]
-\StudentA{} (\RollA)\\
-\StudentB{} (\RollB)\\
-\StudentC{} (\RollC)\\
-\StudentD{} (\RollD)\\[12pt]
+{\normalsize Submitted in partial fulfillment of the requirements for the award of the degree of}\\[6pt]
+{\large\bfseries Bachelor of Technology}\\[4pt]
+{\normalsize in}\\[4pt]
+{\large\bfseries Computer Science and Engineering - Artificial Intelligence}\\[4pt]
+{\normalsize (Batch: \Batch)}\\[20pt]
 
-Under the Supervision of\\[4pt]
-\GuideName{} (Project Guide)\\
-\CoGuideName{} (Project Co-Guide)\\[12pt]
+{\normalsize by}\\[8pt]
+\begin{tabular}{@{}l@{\hspace{2.2em}}r@{}}
+\StudentA & \RollA \\
+\StudentB & \RollB \\
+\StudentC & \RollC \\
+\StudentD & \RollD \\
+\end{tabular}\\[18pt]
 
-\includegraphics[height=2.3cm]{images/galgotias_logo.png}\\[6pt]
-Galgotias College of Engineering \& Technology\\
-Greater Noida, Uttar Pradesh\\
-India-201306\\[10pt]
+{\normalsize Under the Supervision of}\\[6pt]
+{\large\bfseries \GuideName}\\[2pt]
+{\normalsize (Project Guide)}\\[6pt]
+{\large\bfseries \CoGuideName}\\[2pt]
+{\normalsize (Project Co-Guide)}\\[10pt]
 
-Affiliated to\\[6pt]
-\includegraphics[height=2.3cm]{images/aktu_logo.png}\\[6pt]
-Dr. A.P.J. Abdul Kalam Technical University\\
-Lucknow, Uttar Pradesh, India-226031\\[10pt]
+\includegraphics[height=1.9cm]{images/galgotias_logo.png}\\[6pt]
+{\large\bfseries Galgotias College of Engineering \& Technology}\\[2pt]
+{\normalsize Greater Noida, Uttar Pradesh, India-201306}\\[14pt]
 
-\SubmissionDate
+{\normalsize\bfseries Affiliated to}\\[6pt]
+\includegraphics[height=1.9cm]{images/aktu_logo.png}\\[6pt]
+{\large\bfseries Dr. A.P.J. Abdul Kalam Technical University, Lucknow}\\[2pt]
+{\normalsize Uttar Pradesh, India-226031}\\[14pt]
+
+{\normalsize\bfseries \SubmissionDate}
 
 \restoregeometry
 \end{titlepage}
