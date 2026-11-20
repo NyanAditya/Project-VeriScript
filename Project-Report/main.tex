@@ -1,0 +1,59 @@
+% =====================================================================
+%  VeriScript: A Hybrid Heuristic-Transformer System for
+%  AI-Generated Text Detection  --  B.Tech Project Report (final, Ch. 1-8)
+%  Galgotias College of Engineering & Technology, Greater Noida
+%  Compile with pdfLaTeX on Overleaf (Menu -> Compiler -> pdfLaTeX).
+% =====================================================================
+\documentclass[12pt,a4paper,oneside]{report}
+
+\input{preamble}
+\input{details}   % <-- names, roll numbers, designations, date: edit here
+
+\begin{document}
+
+% ---------------- Cover page and inside cover (no page numbers) -----
+\pagenumbering{gobble}
+\input{frontmatter/cover}      % Annexure 1 (cover page)
+\input{frontmatter/cover}      % Inside cover page: same as cover page
+
+% ---------------- Preliminary pages: lowercase roman numerals -------
+\cleardoublepage
+\pagenumbering{roman}
+\pagestyle{plain}
+\input{frontmatter/certificate}
+\input{frontmatter/acknowledgement}
+\input{frontmatter/abstract}
+
+\begingroup
+\onehalfspacing
+\tableofcontents
+\clearpage
+\phantomsection\addcontentsline{toc}{chapter}{LIST OF TABLES}
+\listoftables
+\clearpage
+\phantomsection\addcontentsline{toc}{chapter}{LIST OF FIGURES}
+\listoffigures
+\endgroup
+
+\input{frontmatter/abbreviations}
+\input{frontmatter/nomenclature}
+
+% ---------------- Main body: arabic numerals ------------------------
+\clearpage
+\pagenumbering{arabic}
+\input{chapters/ch1_introduction}
+\input{chapters/ch2_literature_review}
+\input{chapters/ch3_problem_formulation}
+\input{chapters/ch4_proposed_work}
+\input{chapters/ch5_system_design}
+\input{chapters/ch6_implementation}
+\input{chapters/ch7_result_analysis}
+\input{chapters/ch8_conclusion}
+
+% ---------------- References ----------------------------------------
+\input{references}
+
+% ---------------- Appendices (Annexure 12) --------------------------
+\input{appendices/appendices}
+
+\end{document}

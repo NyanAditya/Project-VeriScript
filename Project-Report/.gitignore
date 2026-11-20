@@ -1,0 +1,11 @@
+# LaTeX build artefacts (the compiled report is VeriScript_Final_Report.pdf)
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+main.pdf

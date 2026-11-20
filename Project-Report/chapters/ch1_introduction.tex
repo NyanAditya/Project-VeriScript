@@ -1,0 +1,538 @@
+% =====================================================================
+\chapter{Introduction}
+\label{ch:intro}
+% =====================================================================
+
+The spread of generative artificial intelligence has changed how written
+content is produced. Large language models (LLMs) built on the transformer
+architecture~\cite{vaswani2017attention} and trained on internet-scale corpora
+can now produce text that is fluent, coherent and, in many settings,
+stylistically indistinguishable from human writing~\cite{radford2019language,
+openai2023gpt4,touvron2023llama}. This capability is valuable for productivity
+and creativity, but it also creates serious problems for academic integrity,
+for the verification of originality, and for the trustworthiness of digital
+information~\cite{tang2024science,wu2025survey}.
+
+This chapter introduces the problem addressed by the project, the motivation
+behind it, and the theoretical concepts on which the proposed system,
+\textbf{\veriscript}, is built. It closes with the scope of the work and the
+organisation of the rest of the report.
+
+% ---------------------------------------------------------------------
+\section{Background}
+% ---------------------------------------------------------------------
+
+\subsection{The Rise of Large Language Models}
+
+Statistical language modelling has a long history in natural language
+processing, but its capability changed sharply with the introduction of
+self-attention~\cite{vaswani2017attention}. GPT-2~\cite{radford2019language}
+showed that a decoder-only transformer trained on a large web corpus could
+produce paragraphs of convincing prose with no task-specific supervision.
+Successive generations of models, including GPT-4~\cite{openai2023gpt4}, the
+open-weight LLaMA family~\cite{touvron2023llama}, and commercial assistants
+such as Claude, have scaled the number of parameters, the size of the training
+data and the use of instruction tuning. The result is a class of systems that
+write essays, answer examination questions, summarise articles and imitate a
+requested style on demand.
+
+These systems are now inexpensive and widely available. A student can obtain
+a complete assignment in seconds through a free chat interface, and a content
+farm can generate thousands of articles per day through an application
+programming interface (API). The cost of producing fluent text has therefore
+fallen almost to zero, while the cost of verifying who wrote a given piece of
+text has not.
+
+\subsection{Impact on Academic Integrity and the Information Ecosystem}
+
+Educational institutions rely on written work as evidence of a student's
+understanding. When an assignment can be produced by a model, written
+submissions lose much of their value as an assessment instrument unless the
+institution has some means of checking authorship. Publishers, peer-review
+systems, recruiters and online platforms face a similar problem: reviews,
+news articles, cover letters and social media posts can all be produced at
+scale, and readers can no longer assume that fluent text reflects human effort
+or human accountability~\cite{zellers2019grover,tang2024science}.
+
+Because of this, AI-generated text detection has become a distinct area of
+research and a commercial market. Institutions want a tool that answers a
+simple question, ``was this text written by a person or by a model?'', quickly,
+cheaply, accurately and in a way that can be explained to the person whose
+work is being judged.
+
+\subsection{Why Conventional Plagiarism Detection Is Not Enough}
+
+Traditional plagiarism detectors compare a submitted document against a
+reference database of existing documents and report passages that overlap.
+This works when the dishonest submission is copied from somewhere. AI-generated
+text, however, is sampled afresh from a probability distribution every time a
+model is prompted: it is normally \emph{novel} and does not exist in any prior
+corpus. Overlap-based detection is therefore structurally unable to address
+the problem. Detectors of machine-generated text must instead rely on
+statistical and learned \emph{signatures} of the generation process itself
+rather than on textual overlap with known sources~\cite{wu2025survey}.
+
+% ---------------------------------------------------------------------
+\section{Motivation and Perspective}
+% ---------------------------------------------------------------------
+
+Two broad families of detectors have emerged in the literature and in
+commercial products. The first family is \textbf{heuristic or statistical
+detection}. Because an LLM samples each token from a learned probability
+distribution, its output tends to have lower perplexity and lower
+\emph{burstiness} (more uniform variation from sentence to sentence) than
+human writing~\cite{gehrmann2019gltr,mitchell2023detectgpt,hans2024binoculars}.
+Detectors built on these signals are fast, need little or no training data and
+are fully interpretable, but their accuracy is limited and they are sensitive
+to changes of domain and to adversarial paraphrasing~\cite{krishna2023paraphrasing}.
+
+The second family is \textbf{transformer-based classification}, in which a
+pretrained encoder such as RoBERTa~\cite{liu2019roberta} or
+DeBERTa~\cite{he2021deberta,he2023debertav3} is fine-tuned as a binary
+classifier on labelled human and machine text~\cite{solaiman2019release,
+guo2023hc3}. Such classifiers reach very high in-domain accuracy, but every
+prediction needs a full forward pass through a network with over a hundred
+million parameters. For an institution that must screen thousands of
+submissions at the end of a term, often without a dedicated graphics processing
+unit (GPU), this cost is significant. Commercial services built on such models
+add licence fees and per-page charges, and most of them report only a score
+without explaining how it was obtained.
+
+Institutions and platforms are therefore forced to choose between a detector
+that is fast and cheap but shallow, and one that is accurate but slow,
+expensive and opaque. Two further problems make this choice harder. First,
+large benchmarks show that most detectors generalise poorly to generators that
+were not present in their training data~\cite{dugan2024raid,wang2024m4,
+li2024mage}. Second, widely used detectors have been shown to misclassify the
+writing of non-native English speakers as AI-generated far more often than
+native writing~\cite{liang2023biased}, which is a serious fairness risk when
+the outcome is an accusation of academic misconduct.
+
+The perspective taken in this project is that the two families are not rivals
+but \emph{complements}. Most documents are easy: a heuristic model can label
+them correctly with high confidence. Only a minority are genuinely ambiguous,
+and only those need the expensive, context-aware judgement of a transformer.
+A system that spends its computational budget where it is needed can,
+in principle, approach the accuracy of the transformer at close to the cost of
+the heuristic. This is the motivation for \veriscript.
+
+% ---------------------------------------------------------------------
+\section{Description of Theoretical Concepts}
+\label{sec:theory}
+% ---------------------------------------------------------------------
+
+This section introduces the concepts used throughout the report: how
+language models generate text, the statistics that distinguish model output
+from human writing, transformer classifiers, probability calibration and
+classifier cascades.
+
+\subsection{Autoregressive Language Modelling}
+
+A document $d$ is a sequence of tokens $x_1, x_2, \ldots, x_N$. An
+autoregressive language model with parameters $\theta$ factorises the
+probability of the sequence as a product of next-token conditionals:
+\begin{equation}
+  P_\theta(d) \;=\; \prod_{i=1}^{N} P_\theta\!\left(x_i \mid x_1,\ldots,x_{i-1}\right).
+  \label{eq:autoregressive}
+\end{equation}
+During generation the model repeatedly computes the distribution over the
+vocabulary for the next position, selects a token, appends it to the context
+and repeats, as shown in Fig.~\ref{fig:autoregressive}. Training adjusts
+$\theta$ to maximise the likelihood of a very large corpus of human text, so
+the model learns which continuations are \emph{typical}.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.9cm and 1.0cm]
+  \node[blk,minimum width=3.4cm] (ctx) {Context\\$x_1,\ldots,x_{i-1}$};
+  \node[blk,right=of ctx,minimum width=3.0cm] (lm) {Transformer\\decoder ($\theta$)};
+  \node[blk,right=of lm,minimum width=3.0cm] (dist) {Distribution\\$P_\theta(\,\cdot \mid x_{<i})$};
+  \node[blk,below=1.2cm of dist,minimum width=3.0cm] (samp) {Decoding rule\\(greedy, top-$k$, top-$p$)};
+  \node[blk,below=1.2cm of ctx,minimum width=3.4cm] (tok) {Selected token $x_i$};
+  \draw[arr] (ctx) -- (lm);
+  \draw[arr] (lm) -- (dist);
+  \draw[arr] (dist) -- (samp);
+  \draw[arr] (samp) -- (tok);
+  \draw[arr] (tok) -- node[lbl,left] {append} (ctx);
+\end{tikzpicture}
+\caption{Autoregressive generation loop of a large language model}
+\label{fig:autoregressive}
+\end{figure}
+
+\subsection{Decoding Strategies}
+
+The way the next token is chosen from $P_\theta(\cdot \mid x_{<i})$ strongly
+affects the statistical character of generated text. \emph{Greedy decoding}
+always picks the most probable token and tends to produce repetitive text.
+\emph{Temperature sampling} rescales the logits $z_v$ before the softmax,
+\begin{equation}
+  P_T(v \mid x_{<i}) = \frac{\exp(z_v/T)}{\sum_{u}\exp(z_u/T)},
+  \label{eq:temperature}
+\end{equation}
+so that $T<1$ sharpens and $T>1$ flattens the distribution. \emph{Top-$k$}
+sampling restricts the choice to the $k$ most likely tokens, and \emph{nucleus}
+(top-$p$) sampling restricts it to the smallest set of tokens whose cumulative
+probability exceeds $p$~\cite{holtzman2020curious}. All of these rules remove
+the low-probability tail of the distribution. Human writers do not obey such a
+rule; they regularly choose words that a model would consider unlikely. This
+asymmetry is the root of most statistical detection signals~\cite{gehrmann2019gltr,
+ippolito2020automatic}.
+
+\subsection{Perplexity and Token-Level Statistics}
+
+Given a reference language model, the \emph{perplexity} (PPL) of a document
+is the exponential of the average negative log-likelihood of its tokens:
+\begin{equation}
+  \mathrm{PPL}(d) \;=\; \exp\!\left(-\frac{1}{N}\sum_{i=1}^{N}
+      \log P_\theta\!\left(x_i \mid x_{<i}\right)\right).
+  \label{eq:perplexity}
+\end{equation}
+Low perplexity means that the reference model found the text predictable.
+Because generated text is assembled from high-probability choices, it usually
+has lower perplexity than human text on the same topic. Related token-level
+statistics include the \emph{rank} of each observed token in the predicted
+distribution and the \emph{entropy} of the predicted distribution,
+\begin{equation}
+  H_i \;=\; -\sum_{v \in \mathcal{V}} P_\theta(v \mid x_{<i})\,\log P_\theta(v \mid x_{<i}),
+  \label{eq:entropy}
+\end{equation}
+both of which were used by GLTR~\cite{gehrmann2019gltr}. Perplexity on its own
+is not a reliable detector, because predictable human writing (formal,
+templated or simplified prose) also has low perplexity~\cite{liang2023biased}.
+It is, however, a cheap and informative \emph{feature}.
+
+\subsection{Burstiness and Stylometric Features}
+
+Human writing is \emph{bursty}: a long, complex sentence is often followed by a
+short one, and the predictability of the text rises and falls across a
+document. Model output tends to be more uniform. Let a document contain $S$
+sentences of lengths $\ell_1,\ldots,\ell_S$ with mean $\mu_\ell$ and standard
+deviation $\sigma_\ell$. A common burstiness coefficient is
+\begin{equation}
+  \beta \;=\; \frac{\sigma_\ell - \mu_\ell}{\sigma_\ell + \mu_\ell},
+  \qquad -1 \le \beta \le 1,
+  \label{eq:burstiness}
+\end{equation}
+where values near $-1$ indicate very regular sentence lengths and larger values
+indicate bursty text. The same idea can be applied to the per-sentence
+perplexity, giving a measure of how much the predictability fluctuates.
+
+\emph{Stylometric} features describe the style of a text independently of its
+topic. Examples are the type-token ratio
+\begin{equation}
+  \mathrm{TTR}(d) = \frac{V}{N},
+  \label{eq:ttr}
+\end{equation}
+where $V$ is the number of distinct word types, the distribution of
+part-of-speech (POS) $n$-grams, average word length, punctuation frequency and
+the rate of function words. These features are cheap to compute and easy to
+explain, which makes them suitable for the first stage of a detection
+pipeline.
+
+\subsection{Transformer Encoders and Fine-Tuned Classification}
+
+A transformer encoder maps a token sequence to a sequence of contextual
+vectors using stacked self-attention layers~\cite{vaswani2017attention}. For
+query, key and value matrices $Q$, $K$ and $V$ of dimension $d_k$, one
+attention head computes
+\begin{equation}
+  \mathrm{Attention}(Q,K,V) \;=\; \mathrm{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V.
+  \label{eq:attention}
+\end{equation}
+BERT~\cite{devlin2019bert} pretrains such an encoder with a masked-language
+objective; RoBERTa~\cite{liu2019roberta} improves the pretraining recipe; and
+DeBERTa~\cite{he2021deberta} separates content and position information in the
+attention computation, with DeBERTa-v3~\cite{he2023debertav3} adding a more
+efficient pretraining objective. For classification, a special token
+(\texttt{[CLS]} or \texttt{<s>}) is placed at the start of the input and its
+final hidden vector $\mathbf{h}_{\mathrm{CLS}}$ is passed to a small output
+layer, as in Fig.~\ref{fig:encoder}:
+\begin{equation}
+  p_t(d) \;=\; \sigma\!\left(\mathbf{w}_t^{\top}\mathbf{h}_{\mathrm{CLS}} + b_t\right).
+  \label{eq:clshead}
+\end{equation}
+The whole network is then fine-tuned on labelled examples with the
+cross-entropy loss. Because the encoder reads the entire context in both
+directions, it can learn subtle cues of discourse structure and phrasing that
+hand-crafted statistics miss.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.55cm]
+  \node[blk,minimum width=10.5cm] (tok) {Tokenizer: \texttt{<s>} $x_1\;x_2\;\cdots\;x_L$ \texttt{</s>}};
+  \node[blk,below=of tok,minimum width=10.5cm] (emb) {Token + position embeddings};
+  \node[blk,below=of emb,minimum width=10.5cm,minimum height=1.4cm] (enc)
+     {Stacked self-attention encoder layers (12 layers for the base models)};
+  \node[blk,below=of enc,minimum width=4.2cm] (cls) {$\mathbf{h}_{\mathrm{CLS}}$ (pooled vector)};
+  \node[blk,below=of cls,minimum width=4.2cm] (head) {Linear layer + sigmoid};
+  \node[term,below=of head] (out) {$p_t(d)$ = P(AI-generated)};
+  \draw[arr] (tok) -- (emb);
+  \draw[arr] (emb) -- (enc);
+  \draw[arr] (enc) -- (cls);
+  \draw[arr] (cls) -- (head);
+  \draw[arr] (head) -- (out);
+\end{tikzpicture}
+\caption{Fine-tuned transformer encoder used as a binary text classifier}
+\label{fig:encoder}
+\end{figure}
+
+\subsection{Probability Calibration}
+
+A classifier is \emph{calibrated} if, among all documents to which it assigns
+probability $0.8$, about 80\% are in fact AI-generated. Calibration matters for
+this project because the cascade compares the heuristic stage's probability
+against fixed thresholds; if that probability is badly calibrated, the
+thresholds do not mean what they appear to mean. Modern neural networks are
+often over-confident~\cite{guo2017calibration}. A standard correction is
+\emph{Platt scaling}~\cite{platt1999probabilistic}, which fits two scalars
+$a$ and $b$ on a held-out set so that the raw score $s(d)$ becomes
+\begin{equation}
+  p(d) \;=\; \sigma\!\left(a\,s(d) + b\right).
+  \label{eq:platt}
+\end{equation}
+Calibration quality is commonly measured by the expected calibration error
+(ECE), which bins predictions by confidence and averages the gap between
+confidence and observed accuracy across bins~\cite{guo2017calibration}.
+
+\subsection{Classifier Cascades and Early Exit}
+
+A \emph{cascade} is a sequence of classifiers of increasing cost in which each
+input is passed to the next stage only if the current stage is not confident
+enough. The idea is well established in computer vision, where the
+Viola--Jones face detector rejects most image windows with a few cheap features
+and spends computation only on promising regions~\cite{viola2001rapid}. In deep
+learning the same principle appears as \emph{early exit}: BranchyNet adds
+side classifiers to intermediate layers of a network~\cite{teerapittayanon2016branchynet},
+and DeeBERT applies dynamic early exiting to BERT~\cite{xin2020deebert}. More
+recently, FrugalGPT showed that cascading LLM APIs of increasing price can
+match the best model's quality at a fraction of its cost~\cite{chen2023frugalgpt}.
+
+For a two-stage cascade with per-document costs $C_h$ (cheap stage) and $C_t$
+(expensive stage), and an escalation rate $\alpha$ (the fraction of documents
+passed to the second stage), the expected cost per document is
+\begin{equation}
+  \mathbb{E}[C] \;=\; C_h + \alpha\, C_t .
+  \label{eq:cascadecost}
+\end{equation}
+When $C_t \gg C_h$ and $\alpha$ is small, the cascade costs only a little more
+than the cheap stage alone. The accuracy of the cascade depends on whether the
+cheap stage is right on the documents it keeps, which in turn depends on its
+calibration. Fig.~\ref{fig:cascadeconcept} illustrates the idea in the setting
+of this project.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.8cm and 1.1cm]
+  \node[io,minimum width=2.6cm] (in) {All documents};
+  \node[blk,right=of in,minimum width=3.0cm] (s1) {Stage 1\\cheap, cost $C_h$};
+  \node[blk,right=1.6cm of s1,minimum width=3.0cm] (s2) {Stage 2\\expensive, cost $C_t$};
+  \node[term,below=1.1cm of s1] (o1) {Confident: decide now\\(fraction $1-\alpha$)};
+  \node[term,below=1.1cm of s2] (o2) {Final decision\\(fraction $\alpha$)};
+  \draw[arr] (in) -- (s1);
+  \draw[arr] (s1) -- node[lbl,above] {uncertain} (s2);
+  \draw[arr] (s1) -- (o1);
+  \draw[arr] (s2) -- (o2);
+\end{tikzpicture}
+\caption{General principle of a two-stage classifier cascade}
+\label{fig:cascadeconcept}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\section{Families of AI-Generated Text Detection}
+% ---------------------------------------------------------------------
+
+The detection methods discussed in this report fall into four families,
+summarised in Fig.~\ref{fig:taxonomy}: zero-shot statistical methods that use
+a language model's own probabilities without training a classifier;
+feature-based supervised methods that train a light classifier on hand-crafted
+or model-derived features; fine-tuned neural classifiers; and watermarking,
+which requires cooperation from the model provider at generation time.
+Table~\ref{tab:families} compares the families on the properties that matter
+for deployment.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+   level distance=1.7cm,
+   level 1/.style={sibling distance=3.7cm},
+   level 2/.style={sibling distance=1.9cm},
+   every node/.style={blk,font=\footnotesize,minimum height=0.8cm,text width=2.9cm},
+   edge from parent/.style={draw,thick}]
+\node[text width=4.4cm] {AI-generated text detection}
+  child {node {Zero-shot statistical}
+     child {node[text width=1.6cm] {GLTR}}
+     child {node[text width=1.6cm] {DetectGPT, Binoculars}}}
+  child {node {Feature-based supervised}
+     child {node[text width=1.6cm] {Stylometry + ML}}
+     child {node[text width=1.6cm] {Ghost-buster}}}
+  child {node {Fine-tuned neural classifiers}
+     child {node[text width=1.6cm] {RoBERTa}}
+     child {node[text width=1.6cm] {DeBERTa, RADAR}}}
+  child {node {Generation-time watermarking}
+     child {node[text width=1.6cm] {Green/red token lists}}};
+\end{tikzpicture}
+\caption{Taxonomy of AI-generated text detection approaches}
+\label{fig:taxonomy}
+\end{figure}
+
+\begin{table}[H]
+\caption{Comparison of detection families on deployment-relevant properties}
+\label{tab:families}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{2.9cm}|C|C|C|C|}
+\hline
+\textbf{Property} & \textbf{Zero-shot statistical} & \textbf{Feature-based supervised}
+  & \textbf{Fine-tuned transformer} & \textbf{Watermarking} \\ \hline
+Training data needed & None & Small & Large labelled corpus & None (at detection) \\ \hline
+Inference cost & Low to high$^{\ast}$ & Low & High & Very low \\ \hline
+In-domain accuracy & Moderate to high & Moderate & Very high & Very high \\ \hline
+Interpretability & High & High & Low & High \\ \hline
+Robustness to new generators & Moderate & Moderate & Low to moderate & Provider-specific \\ \hline
+Works on arbitrary text & Yes & Yes & Yes & No \\ \hline
+\multicolumn{5}{|l|}{\footnotesize $^{\ast}$DetectGPT needs many perturbations per document; GLTR-style statistics need one pass.} \\ \hline
+\end{tabularx}
+\end{table}
+
+The table shows that no single family is best on every property. Feature-based
+methods are cheap and interpretable; fine-tuned transformers are accurate.
+\veriscript{} combines the two in a cascade so that each is used for the
+documents on which it is most effective.
+
+% ---------------------------------------------------------------------
+\section{Challenges in Detecting AI-Generated Text}
+% ---------------------------------------------------------------------
+
+Several properties of the problem make detection harder than an ordinary
+text-classification task. They shape the design decisions made later in this
+report.
+
+\subsection{A Shrinking Distributional Gap}
+
+Each new generation of language models is trained to imitate human text more
+closely. As the model distribution approaches the human distribution, the
+statistical differences that detectors rely on become smaller, and in the limit
+no detector can do better than chance~\cite{sadasivan2023reliably}. In practice
+current models still leave measurable traces, but a detector must be
+re-evaluated as new generators appear, which is why this project evaluates
+generalisation to a held-out generator explicitly.
+
+\subsection{Editing and Paraphrasing}
+
+Generated text is rarely submitted unchanged. A student may edit the output,
+merge it with their own writing, or pass it through a paraphrasing tool.
+Paraphrasing models designed for this purpose can reduce the accuracy of
+strong detectors dramatically while preserving meaning~\cite{krishna2023paraphrasing}.
+Lightly edited text tends to move the heuristic statistics towards the human
+range, which is one reason why ambiguous cases should be referred to a model
+that reads the whole context.
+
+\subsection{Short Texts and Domain Shift}
+
+Statistical evidence accumulates with length. A paragraph of 50 words contains
+too few tokens and sentences for perplexity or burstiness to be estimated
+reliably, so detectors are much less accurate on short texts. Detectors also
+behave differently across domains: technical answers, legal prose and poetry
+have very different baseline statistics, and a detector calibrated on one
+domain can be badly mis-calibrated on another~\cite{wang2024m4,li2024mage}.
+
+\subsection{The Base-Rate Problem}
+
+Even an accurate detector produces many false accusations if AI-generated
+submissions are rare. Let $\pi$ be the fraction of submissions that are
+AI-generated, and let the detector have true positive rate TPR and false
+positive rate FPR. By Bayes' theorem the probability that a flagged
+submission really is AI-generated (the precision) is
+\begin{equation}
+  P(\text{AI} \mid \text{flagged}) = \frac{\mathrm{TPR}\cdot\pi}{\mathrm{TPR}\cdot\pi + \mathrm{FPR}\cdot(1-\pi)} .
+  \label{eq:baserate}
+\end{equation}
+For example, with $\mathrm{TPR}=0.95$, $\mathrm{FPR}=0.05$ and $\pi = 0.10$,
+the precision is $0.095/(0.095+0.045) \approx 0.68$: roughly one flagged
+submission in three would be a false accusation, even though the detector is
+``95\% accurate''. The false positive rate therefore matters far more than
+headline accuracy in academic use, and it must be measured separately for
+groups of writers who may be affected differently~\cite{liang2023biased}.
+This is why \veriscript{} treats its output as a calibrated probability to be
+reviewed by a person, and why fairness is a primary evaluation criterion.
+
+\subsection{Cost and Transparency at Scale}
+
+Finally, a detector is useful only if it can be run on every submission and if
+its decisions can be explained. Accurate neural detectors are expensive to run
+over large batches, and commercial services are closed. The combination of
+these practical constraints with the statistical difficulties above is the
+setting in which \veriscript{} is designed.
+
+% ---------------------------------------------------------------------
+\section{Applications}
+% ---------------------------------------------------------------------
+
+An open, inexpensive and explainable detector is useful in several settings:
+\begin{itemize}
+  \item \textbf{Academic institutions}: screening assignments, theses and
+        examination answers in bulk, with explanations that can be shared
+        with the student during a review;
+  \item \textbf{Admissions and recruitment}: triaging statements of purpose,
+        cover letters and essays before human reading;
+  \item \textbf{Publishing and peer review}: checking submissions and reviews
+        for undisclosed machine generation;
+  \item \textbf{Online platforms}: flagging bulk-generated reviews, comments
+        and articles for moderator attention;
+  \item \textbf{Research}: providing an open, reproducible baseline against
+        which new detection methods can be compared on both accuracy and cost.
+\end{itemize}
+In every case the detector acts as a first filter that directs human
+attention; it is not a substitute for human judgement.
+
+% ---------------------------------------------------------------------
+\section{Scope of the Project}
+% ---------------------------------------------------------------------
+
+The project designs, implements and evaluates a hybrid detector for English
+prose. The following are \textbf{within scope}:
+\begin{itemize}
+  \item binary classification of a document as human-written or AI-generated,
+        with a calibrated probability and a short explanation;
+  \item a heuristic detector based on perplexity, burstiness and stylometric
+        features with a classical machine-learning head;
+  \item a fine-tuned RoBERTa-base classifier (the code also supports DeBERTa-v3
+        as a drop-in alternative);
+  \item a confidence-gated cascade whose ambiguity band is tuned on validation
+        data;
+  \item evaluation of accuracy, efficiency, cross-generator generalisation,
+        robustness and fairness on public benchmarks (HC3, M4, RAID, MAGE and
+        the Liang \textit{et al.} essay sets) covering eight generator
+        families, including GPT-4, Llama and Mistral models;
+  \item an open-source command line interface (CLI), REST service and web
+        demonstration, together with a pipeline for adding custom generations
+        from GPT-4, Claude and Llama models.
+\end{itemize}
+
+The following are \textbf{outside the scope} of this project: languages other than
+English, mixed documents in which only some sentences are machine-generated
+(sentence-level localisation), source attribution (identifying \emph{which}
+model wrote a text), watermark detection, and any use of the system as the sole
+basis for disciplinary decisions. The system is intended to support a human
+reviewer, not to replace one.
+
+% ---------------------------------------------------------------------
+\section{Organisation of the Report}
+% ---------------------------------------------------------------------
+
+The rest of this report is organised as follows.
+\textbf{Chapter~2} reviews related work in six areas: statistical and heuristic
+methods, transformer-based classifiers, commercial tools, watermarking,
+benchmark datasets and studies of reliability and fairness, and identifies the
+research gap. \textbf{Chapter~3} formulates the problem, states it precisely,
+depicts its inputs, processes and outputs, and lists the objectives.
+\textbf{Chapter~4} presents the proposed methodology, the cascade algorithm and
+the threshold-tuning procedure. \textbf{Chapter~5} gives the system design
+through data flow diagrams and UML models. \textbf{Chapter~6} describes the
+implementation: the algorithms, software tools, experimental setup, the
+corpus that was built and the trained models. \textbf{Chapter~7} analyses the
+results: accuracy, calibration, robustness, generalisation, fairness and
+efficiency of the three systems, measured against the success criteria and
+hypotheses of Chapter~3. \textbf{Chapter~8} draws conclusions, states the
+limitations of the work and outlines future scope. The appendices contain the
+contribution of the project and a short user guide.

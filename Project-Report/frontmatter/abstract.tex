@@ -1,0 +1,35 @@
+% ---------------- Abstract (Annexure 3): ~300 words, double spaced --
+\chapter*{ABSTRACT}
+\addcontentsline{toc}{chapter}{ABSTRACT}
+\begin{spacing}{1.9}
+Large language models now write text that is difficult to tell apart from human
+writing, which threatens academic integrity. Heuristic detectors based on
+perplexity, burstiness and stylometry are interpretable but shallow, while
+fine-tuned transformer classifiers are accurate but costly and opaque. This
+project built \textbf{VeriScript}, an open detector that combines the two in a
+confidence-gated cascade: a calibrated heuristic model over 38 features
+(GPT-2 token statistics, burstiness, stylometry) decides every document whose
+probability lies outside a tuned ambiguity band $[\Tlow,\Thigh]$, and only
+borderline documents are escalated to a fine-tuned RoBERTa-base classifier. A
+balanced corpus of 44,618 documents was built from HC3, M4, RAID, MAGE and
+native/non-native essay sets, with one generator family held out entirely. On
+the in-distribution test set the cascade escalated 8\% of documents and reached
+F1 0.971, statistically indistinguishable from the transformer (0.975) and well
+above the heuristic (0.946), while halving false positives (2.5\% against
+5.0\%). The transformer collapsed out of distribution, flagging 69\% of human
+MAGE texts and over half of student essays, whereas the cascade stayed far more
+robust and explained every fast-path decision with its most influential
+features. Two expectations were not met: because the GPT-2 reference model costs
+as much as the classifier, the cascade was about twice as slow as the
+transformer on CPU, and its native/non-native false-positive disparity was not
+lower than the baselines', although its absolute false-positive rates were much
+lower than the transformer's. The system is delivered as an open-source library,
+command line tool, REST service and web interface, with a reproducible
+evaluation framework.
+\end{spacing}
+
+\vspace{6pt}
+\noindent\textbf{Keywords:} AI-Generated Text Detection, Hybrid Cascade
+Architecture, Perplexity and Burstiness, Transformer Classifiers, Confidence
+Gating, Fairness
+\clearpage

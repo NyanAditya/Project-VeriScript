@@ -1,0 +1,177 @@
+% =====================================================================
+\chapter{Conclusion, Limitation and Future Scope}
+\label{ch:conclusion}
+% =====================================================================
+
+This chapter summarises what the project achieved, states the limitations of
+the system and of the study, and describes the work that would most improve
+\veriscript{}.
+
+% ---------------------------------------------------------------------
+\section{Conclusion}
+% ---------------------------------------------------------------------
+
+The project set out to build an open detector of AI-generated text that is
+simultaneously accurate, inexpensive, explainable, robust and fair, by routing
+each document through a cheap interpretable heuristic stage and escalating
+only the ambiguous ones to a fine-tuned transformer. All five objectives of
+Chapter~\ref{ch:problem} were carried out:
+\begin{itemize}
+  \item \textbf{O1, heuristic baseline.} A detector over 38 features (GPT-2
+        token statistics, burstiness, stylometry and POS bigrams) with an
+        XGBoost head and isotonic calibration reaches F1 0.946 and AUROC 0.988
+        on the test split, with a well-calibrated probability (ECE 0.015).
+  \item \textbf{O2, transformer baseline.} RoBERTa-base fine-tuned on a
+        balanced corpus of 28,006 documents reaches F1 0.975 and AUROC 0.999
+        in distribution.
+  \item \textbf{O3, hybrid architecture.} A confidence gate with a band tuned
+        on validation data, offered as three operating points.
+  \item \textbf{O4, unified evaluation.} The three systems were compared on
+        identical data for accuracy with bootstrap confidence intervals,
+        calibration, a held-out generator family, leave-one-generator-out
+        retraining, out-of-distribution and adversarial test sets, fairness
+        and CPU and GPU latency.
+  \item \textbf{O5, packaging.} The system is available as a Python library, a
+        command line tool, a REST service, a web interface and a Docker image,
+        with a test suite of 34 tests.
+\end{itemize}
+
+The evaluation leads to four conclusions.
+
+\textbf{First, the two stages are complementary, and the cascade exploits
+this.} With only 8\% of documents escalated, the thorough cascade matches the
+transformer's F1 within statistical uncertainty (0.971 against 0.975) and makes
+half as many false accusations as either baseline (49 against 94 and 100 out of
+2,000 human texts). The heuristic is reliable when it is confident (97.7\% of
+its fast-path decisions are correct), and the transformer is reliable exactly
+where the heuristic is not. On validation data, cascades that escalate 20--30\%
+of documents are more accurate than the transformer alone.
+
+\textbf{Second, the fine-tuned transformer is far less robust than its
+in-distribution scores suggest.} On out-of-distribution text (MAGE) it flags
+69\% of human texts, and on student essays it flags more than half of the native
+and nearly two thirds of the non-native writers. The heuristic, whose features
+describe generic statistical properties of text, degrades much more gracefully.
+A cascade that keeps confident heuristic decisions is therefore not only
+cheaper in principle but considerably safer in practice than a stand-alone
+transformer, and the gate visibly escalates more documents (up to 44\%) when it
+meets unfamiliar data.
+
+\textbf{Third, the efficiency premise does not hold in the implemented form.}
+The heuristic stage relies on a GPT-2 pass that costs as much as the RoBERTa
+classifier itself, plus a vocabulary projection and spaCy tagging, so the
+cascade is about twice as slow as the transformer on the CPU and seven times as
+slow on the GPU. The design principle ``cheap by default'' is only satisfied if
+the first stage is genuinely cheaper than the second; a reference language
+model of the same size as the classifier violates it. This is a negative result,
+but a useful one: it identifies precisely which component must change
+(Section~\ref{sec:future}).
+
+\textbf{Fourth, fairness must be measured in absolute as well as relative
+terms.} All systems flag non-native writing more often than native writing. A
+disparity-only constraint was satisfied by the tuning procedure in a degenerate
+way, by making the detector equally bad for both groups; the worst-group
+constraint adopted instead protects non-native writers relative to the
+transformer (25.5\% against 63.8\% false positives) but not relative to the
+heuristic alone (17.0\%). No configuration is fair enough to justify automatic
+sanctions.
+
+In summary, \veriscript{} delivers an open, explainable and comparatively robust
+detector that equals a fine-tuned transformer in accuracy while halving false
+positives, and it provides a complete, reproducible evaluation framework. It
+does not yet deliver the intended reduction in computational cost.
+
+% ---------------------------------------------------------------------
+\section{Limitation}
+% ---------------------------------------------------------------------
+
+\textbf{Limitations of the system.}
+\begin{itemize}
+  \item \textbf{Cost.} The heuristic stage is slower than the transformer it is
+        meant to save (Table~\ref{tab:latency}); the cascade is therefore not
+        suitable where throughput is the main concern.
+  \item \textbf{False positives on unfamiliar genres.} Even the best
+        configuration flags about one in four TOEFL essays and one in five
+        human MAGE texts. The output must be treated as a prompt for human
+        review and never as evidence of misconduct on its own.
+  \item \textbf{Scope.} The system handles English prose of at least 100
+        words. It does not localise AI-written passages inside mixed
+        documents, does not identify which model wrote a text, and has not been
+        evaluated on code, poetry written for assignments, or very short
+        answers.
+  \item \textbf{Paraphrasing and editing.} The most accurate system on
+        paraphrased MAGE text (the thorough cascade) detects only three in four
+        paraphrased AI texts; a determined user who paraphrases or rewrites the
+        output can evade detection.
+  \item \textbf{Transformer brittleness.} The second stage was fine-tuned only
+        on the three training benchmarks and inherits their genre biases,
+        which is the main source of false positives on escalated essays.
+\end{itemize}
+
+\textbf{Limitations of the study.}
+\begin{itemize}
+  \item \textbf{Generators.} The corpus contains public benchmark generations
+        up to GPT-4, Llama-2, Mistral and MPT. Custom generations from current
+        GPT-4-class, Claude and Llama~3 models were not produced, so the results
+        may not carry over to the newest models.
+  \item \textbf{Sample sizes.} The held-out Mistral set (744 documents), the
+        attack set (690) and above all the fairness test set (128 essays) are
+        small; differences of a few percentage points on them are within
+        sampling noise.
+  \item \textbf{Single run.} Every model was trained once with one random seed;
+        variation between training runs is not measured, and the confidence
+        intervals reflect only test-set sampling.
+  \item \textbf{Fairness proxy.} Native and non-native writing are represented by
+        three essay collections that also differ in topic, age group and
+        genre, so part of the measured disparity may be due to these
+        differences rather than to the writer's first language.
+  \item \textbf{Alternative encoder.} DeBERTa-v3 was implemented but not
+        trained, so the comparison between encoders was not carried out.
+\end{itemize}
+
+% ---------------------------------------------------------------------
+\section{Future Scope}
+\label{sec:future}
+% ---------------------------------------------------------------------
+
+\textbf{A genuinely cheap first stage.} The most important next step follows
+directly from the efficiency result. The reference statistics can be computed
+with a much smaller language model, for example a distilled GPT-2 or a
+70--160 million parameter model with a smaller vocabulary, or with weak
+unigram and trigram models as in Ghostbuster~\cite{verma2024ghostbuster}; the
+number of scored tokens can be capped at 512; and spaCy POS tagging can be
+replaced by a faster tagger or dropped, since the twenty POS bigrams together
+contribute under 10\% of the head's gain while spaCy dominates the stage's cost
+on the GPU. A two-tier first stage, in which text-only stylometric
+features decide the clearest documents before any language model is run, would
+reduce the cost further. Each variant can be evaluated with the existing
+pipeline by changing one configuration value and repeating the feature
+extraction.
+
+\textbf{A more robust second stage.} The transformer's collapse on
+out-of-distribution text and on student essays calls for training data from
+more genres (school and university essays in particular), adversarial or
+paraphrase-augmented training as in RADAR~\cite{hu2023radar}, and evaluation
+of DeBERTa-v3. Because the cascade escalates exactly the hard documents, the
+second stage could also be trained with extra weight on them.
+
+\textbf{Current generators.} Running the provided generation script for
+current GPT-4-class, Claude and Llama~3 models, and repeating the
+leave-one-generator-out evaluation for them, would show how well the detector
+transfers to the models students actually use today.
+
+\textbf{Better fairness evaluation.} Larger and better-matched native and
+non-native essay collections on the same prompts would separate the effect of
+the writer's first language from genre effects. Group-aware thresholds or a
+per-institution recalibration (already supported by the
+\texttt{retrain-heuristic} and \texttt{tune} commands) could then reduce the
+remaining disparity.
+
+\textbf{Finer-grained output.} Sentence-level scoring would allow the system to
+highlight which passages of a mixed document look machine-generated, which is
+both more useful to a reviewer and more informative to the student.
+
+\textbf{Deployment.} Integration with a learning management system, a
+reviewer workflow that records decisions and their outcomes, and periodic
+recalibration on new labelled data would turn the prototype into a tool that an
+institution can operate responsibly.

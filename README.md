@@ -16,6 +16,9 @@ The band is tuned on validation data to give the lowest escalation rate (cost) w
 ε of the transformer-only detector, without a larger native / non-native false-positive gap
 (Algorithm 4.3 of the report). Everything runs locally on open-source models.
 
+**Documentation:** [Manual.md](Manual.md) is a plain-language guide for non-technical users. The final
+project report (LaTeX sources and compiled PDF) is in [Project-Report/](Project-Report/VeriScript_Final_Report.pdf).
+
 > **Use responsibly.** Scores are probabilistic estimates, not proof of misconduct. Every result
 > carries an advisory note and should be reviewed by a person.
 
@@ -68,6 +71,7 @@ python -m train.train_transformer       # RoBERTa-base fine-tuning -> models/tra
 python -m train.predict                 # cache p_h and p_t on every evaluation split
 python -m train.tune_thresholds         # fast / balanced / thorough bands -> models/operating_points.json
 python -m train.evaluate_all            # reports/results.md, reports/results.json, reports/figures/
+python -m train.report_figures          # black-and-white figures for the report -> Project-Report/images/results/
 ```
 
 Optional, for the generalisation study:

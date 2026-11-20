@@ -1,0 +1,105 @@
+{
+  "feature_importance_pct": {
+    "mean_log_prob": 30.54,
+    "perplexity": 25.03,
+    "type_token_ratio": 6.09,
+    "mean_entropy": 4.6,
+    "std_log_prob": 4.21,
+    "function_word_rate": 3.18,
+    "mean_word_length": 2.75,
+    "sentence_length_burstiness": 2.58,
+    "top10_rank_fraction": 2.12,
+    "pos_bigram:PUNCT_PUNCT": 1.35,
+    "comma_rate": 1.34,
+    "top100_rank_fraction": 1.23,
+    "colon_rate": 1.22,
+    "min_sentence_perplexity": 1.18,
+    "tail_rank_fraction": 1.0
+  },
+  "confusion_test": {
+    "heuristic": {
+      "tn": 1906,
+      "fp": 94,
+      "fn": 120,
+      "tp": 1880
+    },
+    "transformer": {
+      "tn": 1900,
+      "fp": 100,
+      "fn": 4,
+      "tp": 1996
+    },
+    "cascade_fast": {
+      "tn": 1906,
+      "fp": 94,
+      "fn": 119,
+      "tp": 1881
+    },
+    "cascade_balanced": {
+      "tn": 1904,
+      "fp": 96,
+      "fn": 109,
+      "tp": 1891
+    },
+    "cascade_thorough": {
+      "tn": 1951,
+      "fp": 49,
+      "fn": 66,
+      "tp": 1934
+    }
+  },
+  "f1_by_length": {
+    "100-250": {
+      "n": 2668,
+      "heuristic": 0.9453,
+      "transformer": 0.974,
+      "cascade_thorough": 0.9698,
+      "escalation_thorough": 0.072
+    },
+    "250-500": {
+      "n": 995,
+      "heuristic": 0.9405,
+      "transformer": 0.9728,
+      "cascade_thorough": 0.971,
+      "escalation_thorough": 0.098
+    },
+    ">500": {
+      "n": 337,
+      "heuristic": 0.9699,
+      "transformer": 0.9853,
+      "cascade_thorough": 0.982,
+      "escalation_thorough": 0.089
+    }
+  },
+  "by_source": {
+    "hc3": {
+      "n": 1890,
+      "heuristic": 0.9782,
+      "transformer": 0.9783,
+      "cascade_thorough": 0.9885
+    },
+    "m4": {
+      "n": 1482,
+      "heuristic": 0.9212,
+      "transformer": 0.9834,
+      "cascade_thorough": 0.957
+    },
+    "raid": {
+      "n": 628,
+      "heuristic": 0.9042,
+      "transformer": 0.944,
+      "cascade_thorough": 0.9509
+    }
+  },
+  "windows_test": {
+    "mean": 1.19625,
+    "max": 6,
+    "share_multi": 0.132
+  },
+  "escalated_thorough": {
+    "n": 320,
+    "heuristic_acc_on_escalated": 0.6,
+    "transformer_acc_on_escalated": 0.909375,
+    "heuristic_acc_on_fast": 0.9766304347826087
+  }
+}

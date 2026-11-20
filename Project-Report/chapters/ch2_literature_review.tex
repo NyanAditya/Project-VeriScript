@@ -1,0 +1,515 @@
+% =====================================================================
+\chapter{Literature Review}
+\label{ch:lit}
+% =====================================================================
+
+\section{Introduction}
+
+Research on detecting machine-generated text began in earnest with the
+release of GPT-2 in 2019 and has grown rapidly since the public release of
+ChatGPT. Recent surveys~\cite{tang2024science,wu2025survey} organise the field
+by the kind of evidence a detector uses and by the access it requires to the
+generating model. For this project the literature and the market are reviewed
+in seven areas:
+\begin{enumerate}
+  \item statistical and heuristic (zero-shot and feature-based) methods;
+  \item supervised transformer-based classifiers;
+  \item commercial detection products;
+  \item watermarking and generation-time signals;
+  \item benchmark datasets and the evidence they provide about generalisation;
+  \item studies of robustness, reliability and fairness;
+  \item efficient inference through cascades and early exit, which is the
+        design principle that \veriscript{} borrows from outside the
+        detection literature.
+\end{enumerate}
+Fig.~\ref{fig:timeline} places the main works on a timeline. Each area is
+reviewed below, followed by a synthesis that identifies the research gap
+addressed by this project.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=2.45cm,y=1cm]
+  \draw[thick,->] (0,0) -- (5.6,0);
+  \foreach \x/\yr in {0.3/2019,1.3/2020,2.3/2023,3.6/2024,4.9/2025}{
+     \draw[thick] (\x,0.12) -- (\x,-0.12);
+     \node[below,font=\small\bfseries] at (\x,-0.15) {\yr};}
+  \node[blk,font=\scriptsize,text width=2.0cm,above] at (0.3,0.45)
+     {GLTR~\cite{gehrmann2019gltr}\\GPT-2 detector~\cite{solaiman2019release}\\Grover~\cite{zellers2019grover}};
+  \node[blk,font=\scriptsize,text width=1.9cm,below] at (1.3,-0.75)
+     {Human vs.\ machine study~\cite{ippolito2020automatic}};
+  \node[blk,font=\scriptsize,text width=2.2cm,above] at (2.3,0.45)
+     {DetectGPT~\cite{mitchell2023detectgpt}\\Watermark~\cite{kirchenbauer2023watermark}\\HC3~\cite{guo2023hc3}\\DIPPER~\cite{krishna2023paraphrasing}\\RADAR~\cite{hu2023radar}\\Bias study~\cite{liang2023biased}};
+  \node[blk,font=\scriptsize,text width=2.3cm,below] at (3.6,-0.75)
+     {Binoculars~\cite{hans2024binoculars}\\Fast-DetectGPT~\cite{bao2024fast}\\Ghostbuster~\cite{verma2024ghostbuster}\\M4~\cite{wang2024m4}, MAGE~\cite{li2024mage}\\RAID~\cite{dugan2024raid}};
+  \node[blk,font=\scriptsize,text width=1.8cm,above] at (4.9,0.45)
+     {Survey~\cite{wu2025survey}};
+\end{tikzpicture}
+\caption{Timeline of representative work on AI-generated text detection}
+\label{fig:timeline}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\section{Statistical and Heuristic Detection Methods}
+% ---------------------------------------------------------------------
+
+Statistical methods exploit the fact that a language model assigns
+systematically different probabilities to its own output than to human
+writing. Most of them need only a reference model to score tokens and either
+no training at all (zero-shot) or a very small classifier on top of a few
+features.
+
+\subsection{GLTR: Token Rank and Probability}
+
+GLTR (Giant Language model Test Room)~\cite{gehrmann2019gltr} was one of the
+first practical tools. For each token of a passage it computes, under a
+reference model such as GPT-2, the probability of the observed token, its
+rank in the predicted distribution and the entropy of that distribution. It
+then colours each token by its rank bucket (top-10, top-100, top-1000, other).
+Generated text is dominated by top-10 tokens, while human text contains a
+noticeable share of low-rank choices. In a user study, GLTR raised the rate at
+which untrained people correctly identified generated text from roughly chance
+level to over 70\%. GLTR established that simple distributional statistics
+separate human and machine text, and its features form the basis of almost
+every heuristic that followed, including the perplexity features used in this
+project.
+
+\subsection{DetectGPT and Fast-DetectGPT: Probability Curvature}
+
+DetectGPT~\cite{mitchell2023detectgpt} proposed a zero-shot criterion based on
+the local shape of the log-probability function. Text sampled from a model
+tends to lie near a local maximum of that model's log-probability; small
+rewrites of such text therefore lower its log-probability on average, while
+rewrites of human text change it in either direction. DetectGPT generates
+many perturbed versions of a passage with a mask-filling model (T5), scores
+the original and the perturbations, and uses the normalised difference as its
+statistic. The method needs no classifier training and performed strongly on
+several generators, but it requires on the order of a hundred model calls per
+document, which makes it expensive for bulk screening.
+
+Fast-DetectGPT~\cite{bao2024fast} replaces the perturbation step with a
+sampling step based on \emph{conditional} probability curvature, which can be
+computed from a single forward pass. The authors report that it accelerates
+detection by a factor of about 340 relative to DetectGPT while improving
+detection accuracy by a relative margin of roughly 75\% in their experiments.
+This shows that curvature-type statistics can be made cheap enough for the
+first stage of a pipeline.
+
+\subsection{Binoculars: Cross-Perplexity}
+
+Binoculars~\cite{hans2024binoculars} addresses a known weakness of raw
+perplexity: a human text on an unusual topic may have high perplexity simply
+because its content is surprising, while a model asked to write about that
+topic would also produce surprising content. Binoculars therefore divides the
+perplexity of a passage under an ``observer'' model by a cross-perplexity
+computed from how surprising one model's predictions are to a closely related
+``performer'' model. The ratio normalises away the effect of the prompt and
+topic. Without any training on ChatGPT data, Binoculars detected over 90\% of
+generated samples from ChatGPT and other LLMs at a false positive rate of
+0.01\% in the authors' evaluation. Its main practical cost is that it must
+run two billion-parameter-scale language models for every document.
+
+\subsection{Stylometric and Burstiness Signals}
+
+Long before neural text generation, authorship attribution relied on
+stylometric features: sentence-length distribution, vocabulary richness,
+function-word frequencies and part-of-speech patterns. These features carry
+over naturally to machine-text detection. The analysis accompanying the HC3
+corpus~\cite{guo2023hc3} found that ChatGPT answers differ from human expert
+answers in measurable ways such as vocabulary size, the distribution of
+part-of-speech tags and the use of connective words, and that a simple
+classifier on such statistics already achieves useful accuracy. Burstiness,
+the variation of sentence length and per-sentence perplexity across a
+document, is the signal popularised by the original release of GPTZero.
+Stylometric features are inexpensive and interpretable, but they are also
+the features most affected by genre and by the writer's proficiency, which
+is a concern discussed in Section~\ref{sec:lit-fairness}.
+
+\subsection{Ghostbuster: Learned Combinations of Probability Features}
+
+Ghostbuster~\cite{verma2024ghostbuster} sits between zero-shot and supervised
+methods. It passes a document through a series of weaker language models
+(a unigram model, a trigram model and two GPT-3 variants), computes token
+probabilities under each, and runs a structured search over arithmetic
+combinations of these probability vectors to produce a compact set of
+features. A linear classifier is then trained on the selected features. The
+method does not need the generating model's own probabilities and the authors
+report better generalisation across domains, prompts and generators than
+single-model classifiers. Ghostbuster is the closest published precedent for
+the heuristic stage of \veriscript{}: a small, interpretable classifier on top
+of language-model-derived features.
+
+Table~\ref{tab:lit-stat} summarises the statistical methods reviewed.
+
+\begin{table}[H]
+\caption{Summary of statistical and heuristic detection methods}
+\label{tab:lit-stat}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{2.5cm}|L|L|L|}
+\hline
+\textbf{Method} & \textbf{Core signal} & \textbf{Strength} & \textbf{Limitation} \\ \hline
+GLTR~\cite{gehrmann2019gltr} & Token rank, probability and entropy under a reference LM & Very fast, visual, interpretable & Shallow; weak against modern sampling and paraphrasing \\ \hline
+DetectGPT~\cite{mitchell2023detectgpt} & Log-probability curvature under perturbations & Zero-shot, strong on many generators & About 100 model calls per document \\ \hline
+Fast-DetectGPT~\cite{bao2024fast} & Conditional probability curvature & Single pass; much faster than DetectGPT & Still needs a sizeable scoring LM \\ \hline
+Binoculars~\cite{hans2024binoculars} & Ratio of perplexity to cross-perplexity & High accuracy at very low FPR without training & Two large LMs per document \\ \hline
+Stylometry / burstiness~\cite{guo2023hc3} & Sentence-length variance, TTR, POS patterns & Cheap, fully explainable & Sensitive to genre and writer proficiency \\ \hline
+Ghostbuster~\cite{verma2024ghostbuster} & Searched combinations of weak-LM probabilities + linear model & Good cross-domain generalisation & Multiple LM passes; feature search is costly offline \\ \hline
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Transformer-Based Classifiers}
+% ---------------------------------------------------------------------
+
+The second major family treats detection as ordinary supervised text
+classification and fine-tunes a pretrained encoder on labelled examples.
+
+\subsection{Early Neural Detectors}
+
+When OpenAI staged the release of GPT-2, it published a detector obtained by
+fine-tuning RoBERTa on GPT-2 outputs~\cite{solaiman2019release,liu2019roberta}.
+The fine-tuned classifier detected GPT-2 text far more accurately than
+zero-shot baselines, and for some time it was the reference detector in the
+field. At the same time, Zellers \textit{et al.}~\cite{zellers2019grover}
+introduced Grover, a model for generating fake news articles, and showed that
+the best defence against Grover was Grover itself used as a discriminator: a
+detector benefits greatly from having been trained on the same kind of model
+that produced the text. This observation foreshadows the generalisation
+problem discussed later.
+
+Ippolito \textit{et al.}~\cite{ippolito2020automatic} compared automatic
+detectors with human judges and found an instructive asymmetry. Decoding
+strategies that remove the low-probability tail (such as top-$k$) make text
+\emph{more} convincing to humans but \emph{easier} for automatic detectors,
+because the missing tail is a statistical fingerprint. Conversely, sampling
+from the full distribution fools detectors more often but produces text that
+humans find less fluent. Automatic and human detection therefore exploit
+different evidence.
+
+\subsection{Stronger Encoders: RoBERTa and DeBERTa}
+
+Later work replaced the original classifier with stronger encoders.
+RoBERTa~\cite{liu2019roberta} improves on BERT~\cite{devlin2019bert} by
+training longer on more data with dynamic masking and without the
+next-sentence objective. DeBERTa~\cite{he2021deberta} introduces disentangled
+attention, in which each token is represented by separate content and
+relative-position vectors, together with an enhanced mask decoder;
+DeBERTa-v3~\cite{he2023debertav3} adopts an ELECTRA-style replaced-token
+detection objective and is among the strongest base-sized encoders available.
+The HC3 authors fine-tuned RoBERTa detectors on their corpus and obtained
+very high in-domain scores~\cite{guo2023hc3}, and fine-tuned RoBERTa and
+DeBERTa models are standard strong baselines in recent benchmarks~\cite{wang2024m4,
+li2024mage,dugan2024raid}.
+
+The weakness of these classifiers is not in-domain accuracy but cost and
+transfer. A base-sized encoder has on the order of 125--185 million parameters
+and processes up to 512 tokens per forward pass; long documents need several
+passes. On a CPU-only server, inference for a large batch of essays is slow.
+The benchmarks reviewed in Section~\ref{sec:lit-bench} also show that accuracy
+falls when the test text comes from a generator, domain or decoding strategy
+not seen in training.
+
+\subsection{Adversarially Trained Detectors}
+
+RADAR~\cite{hu2023radar} targets robustness to paraphrasing by training a
+detector and a paraphraser together in an adversarial loop. The paraphraser
+is rewarded for rewriting AI text so that the detector labels it human; the
+detector is trained on human text, original AI text and the paraphraser's
+output. Evaluated on eight LLMs across four datasets, RADAR outperformed
+existing detectors, especially when paraphrasing was applied, and its
+detector transferred well across instruction-tuned models. RADAR's detector is
+itself a fine-tuned RoBERTa-large model, so it shares the inference cost of the
+transformer family. Adversarial training is complementary to \veriscript{}:
+a RADAR-style model could serve as the second stage of the cascade.
+
+% ---------------------------------------------------------------------
+\section{Commercial Market Solutions}
+% ---------------------------------------------------------------------
+
+Commercial detectors are what institutions actually deploy, so their
+characteristics define the practical baseline for this project. Their models
+are proprietary and their public documentation gives limited technical
+detail; the descriptions below are therefore based on vendor descriptions and
+on published independent evaluations, and are kept to properties that matter
+for deployment.
+
+\begin{itemize}
+  \item \textbf{Turnitin (AI writing detection)} is integrated into the
+        similarity-checking workflow that universities already use through
+        their learning management systems (LMS). It reports the proportion
+        of a submission it considers AI-generated. Its main advantages are
+        seamless integration and a large academic customer base; its main
+        disadvantages for this project's purposes are that it is a closed
+        model sold through institutional licences and that the basis for an
+        individual score cannot be inspected or audited by the institution.
+  \item \textbf{GPTZero} was first released as a lightweight detector built on
+        perplexity and burstiness and has since grown into a multi-stage
+        product that combines statistical signals with learned models. It is
+        fast and accessible, with free and paid tiers. As with other
+        perplexity-based tools, formal and highly structured human prose is a
+        known source of false alarms.
+  \item \textbf{Copyleaks} offers AI-content detection through a web interface
+        and an API, with support for several languages. Processing takes place
+        on the vendor's servers and is priced per page or per credit, which
+        adds network latency and recurring cost for bulk use.
+  \item \textbf{Originality.ai} is marketed mainly to web publishers and
+        search-engine-optimisation (SEO) professionals. It emphasises
+        sensitivity to text from recent models; high sensitivity settings
+        raise the risk of flagging polished human writing.
+  \item \textbf{Scribbr and QuillBot} are writing-assistance platforms that
+        include AI detectors alongside paraphrasing and grammar tools. Free
+        tiers impose character limits, and the tools are designed for
+        individual checks rather than bulk institutional screening.
+\end{itemize}
+
+Table~\ref{tab:lit-commercial} compares these products on the deployment
+dimensions identified in Chapter~\ref{ch:intro}. The common pattern is that
+every commercial tool is closed, none publishes the features behind its
+decision, and cost scales with volume.
+
+\begin{table}[H]
+\caption{Deployment characteristics of commercial AI-text detectors}
+\label{tab:lit-commercial}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{2.6cm}|L|L|L|L|}
+\hline
+\textbf{Tool} & \textbf{Primary audience} & \textbf{Access model} & \textbf{Explains decisions?} & \textbf{Main concern for institutions} \\ \hline
+Turnitin & Universities (LMS) & Institutional licence & Score only & Opaque, cannot be audited \\ \hline
+GPTZero & Educators, individuals & Free and paid tiers, API & Sentence highlighting & False alarms on formal prose \\ \hline
+Copyleaks & Enterprises, education & Per-page / credit API & Score with highlights & Recurring cost, server-side latency \\ \hline
+Originality.ai & Publishers, SEO & Pay-per-scan credits & Score with highlights & Aggressive thresholds, false positives \\ \hline
+Scribbr / QuillBot & Students, writers & Freemium, character limits & Score only & Not suited to bulk screening \\ \hline
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Watermarking and Generation-Time Signals}
+% ---------------------------------------------------------------------
+
+Watermarking takes a structurally different approach: instead of detecting
+text after the fact, the model provider embeds a detectable signal at
+generation time. Kirchenbauer \textit{et al.}~\cite{kirchenbauer2023watermark}
+proposed seeding a pseudo-random function with the previous token to split
+the vocabulary into a ``green'' list and a ``red'' list at every step, and
+adding a small bias to the logits of green tokens. Human text contains green
+tokens about as often as chance predicts, while watermarked text contains
+significantly more; a one-sided $z$-test on the green-token count detects the
+watermark from as few as a couple of hundred tokens, with negligible effect on
+text quality.
+
+Watermarking is extremely cheap to detect and comes with a statistical
+guarantee, but it has two limitations that rule it out as the primary method
+for this project. First, it requires the cooperation of the model provider;
+it cannot be applied retroactively to text produced by an unwatermarked model,
+an open-weight model run locally, or a provider that chooses not to
+participate. Second, paraphrasing substantially weakens the
+watermark~\cite{krishna2023paraphrasing,sadasivan2023reliably}. Watermark
+checking is therefore treated in this report as a possible future third tier
+of the cascade rather than as an alternative to it.
+
+% ---------------------------------------------------------------------
+\section{Benchmark Datasets and Generalisation}
+\label{sec:lit-bench}
+% ---------------------------------------------------------------------
+
+Detector accuracy reported on a single dataset says little about behaviour in
+deployment. Several benchmarks have been built specifically to measure
+generalisation.
+
+\textbf{HC3}~\cite{guo2023hc3} (Human ChatGPT Comparison Corpus) pairs human
+and ChatGPT answers to the same questions. Its English portion contains 24,322
+questions with 58,546 human answers and 26,903 ChatGPT answers drawn from
+Reddit's ELI5, open-domain question answering, Wikipedia computer-science
+topics, finance and medicine. Because both answers respond to the same prompt,
+HC3 allows a controlled comparison in which topic is held fixed.
+
+\textbf{M4}~\cite{wang2024m4} is a multi-generator, multi-domain and
+multilingual benchmark covering several generators (including ChatGPT,
+GPT-3.5 davinci, Cohere, Dolly-v2 and BLOOMz), domains such as Wikipedia,
+WikiHow, Reddit, arXiv abstracts and peer reviews, and several languages. Its
+main finding is that detectors struggle to generalise to unseen domains or
+unseen generators, and that in such cases they tend to misclassify
+machine-generated text as human-written.
+
+\textbf{MAGE}~\cite{li2024mage} collects 447,674 human-written and
+machine-generated texts from ten writing tasks and 27 LLMs, organised into
+testbeds of increasing difficulty. Detection becomes markedly harder
+out of distribution; the best detector identified 84.12\% of out-of-domain
+texts generated by a new LLM, which the authors interpret as showing that the
+problem is difficult but feasible.
+
+\textbf{RAID}~\cite{dugan2024raid} is the largest of these benchmarks, with
+over six million generations from 11 models across 8 domains, several decoding
+strategies and 11 adversarial attacks such as paraphrasing, synonym swaps and
+homoglyph substitution. RAID showed that detectors that claim very high
+accuracy on their own test sets lose much of that accuracy when evaluated on
+unseen models, on different sampling settings, or under simple attacks.
+
+Table~\ref{tab:lit-bench} summarises the benchmarks. Together they motivate two
+design decisions in \veriscript{}: the training corpus must mix generators and
+domains, and the evaluation must include a held-out generator.
+
+\begin{table}[H]
+\caption{Benchmark datasets for machine-generated text detection}
+\label{tab:lit-bench}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{2.0cm}|L|L|L|}
+\hline
+\textbf{Benchmark} & \textbf{Composition} & \textbf{Key finding} & \textbf{Use in this project} \\ \hline
+HC3~\cite{guo2023hc3} & 24,322 English questions; 58,546 human and 26,903 ChatGPT answers; 5 domains & Human and ChatGPT answers differ in vocabulary and style & Topic-controlled training and validation pairs \\ \hline
+M4~\cite{wang2024m4} & Multiple generators, domains and languages & Poor transfer to unseen domains and generators & Domain diversity; English subset \\ \hline
+MAGE~\cite{li2024mage} & 447,674 texts; 27 LLMs; 10 tasks & Out-of-distribution detection is much harder & Additional out-of-distribution test material \\ \hline
+RAID~\cite{dugan2024raid} & 6M+ generations; 11 models; 8 domains; 11 attacks & High reported accuracy collapses on unseen models and attacks & Robustness and attack evaluation \\ \hline
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Robustness, Reliability and Fairness}
+\label{sec:lit-fairness}
+% ---------------------------------------------------------------------
+
+\subsection{Paraphrasing Attacks}
+
+Krishna \textit{et al.}~\cite{krishna2023paraphrasing} trained DIPPER, an
+11-billion-parameter paraphrase model that rewrites whole paragraphs with
+controllable lexical diversity and reordering. Paraphrasing text generated by
+three LLMs with DIPPER evaded several detectors, including watermarking,
+GPTZero, DetectGPT and OpenAI's text classifier; for example, it reduced
+DetectGPT's detection accuracy from 70.3\% to 4.6\% at a fixed 1\% false
+positive rate without appreciably changing the meaning. The authors proposed a
+retrieval-based defence in which the model provider stores its generations and
+checks candidate texts for semantic similarity, which again requires provider
+cooperation.
+
+\subsection{Theoretical Limits of Detection}
+
+Sadasivan \textit{et al.}~\cite{sadasivan2023reliably} argued that as language
+models approximate the distribution of human text more closely, the best
+achievable detector performance approaches that of a random classifier, and
+demonstrated recursive paraphrasing attacks against several detector types.
+Their analysis does not make detection useless in practice, because current
+models still differ measurably from human writing, but it is an important
+caution: any detector's output is evidence, not proof, and should be presented
+with a calibrated confidence rather than as a verdict.
+
+\subsection{Bias Against Non-Native English Writers}
+
+Liang \textit{et al.}~\cite{liang2023biased} evaluated seven widely used GPT
+detectors on essays written by native and non-native English speakers. The
+detectors classified native-written essays accurately, but more than half of
+the TOEFL essays written by non-native speakers were incorrectly flagged as
+AI-generated. The authors traced the effect to perplexity: writing with a more
+limited vocabulary and simpler constructions is more predictable to a language
+model, which is exactly the property perplexity-based detectors rely on. They
+also showed that prompting an LLM to enrich the vocabulary of the non-native
+essays reduced the false-positive rate, which demonstrates that the detectors
+were responding to linguistic sophistication rather than authorship.
+
+This finding is directly relevant to \veriscript{}, because its first stage
+uses perplexity and lexical diversity. It motivates two design choices
+explained in Chapter~\ref{ch:proposed}: the heuristic stage is allowed to
+decide only when it is highly confident, so that borderline texts, which are
+where such bias is most likely to cause errors, are passed to the
+context-aware transformer; and the false-positive rate on non-native writing
+is measured as a primary evaluation criterion.
+
+% ---------------------------------------------------------------------
+\section{Efficient Inference: Cascades and Early Exit}
+% ---------------------------------------------------------------------
+
+The cost of transformer inference is a general problem, and several lines of
+work outside the detection literature address it. They provide the
+methodological basis for the cascade in \veriscript{}.
+
+\textbf{Boosted cascades.} The Viola--Jones face detector~\cite{viola2001rapid}
+arranged increasingly complex classifiers in a cascade so that the great
+majority of image windows were rejected by the first, very cheap stages.
+This made real-time detection possible on 2001 hardware and is the classic
+demonstration that most inputs do not need the most expensive model.
+
+\textbf{Early exit in deep networks.} BranchyNet~\cite{teerapittayanon2016branchynet}
+attached side classifiers to intermediate layers of a convolutional network
+and let a sample exit at the first branch whose prediction entropy fell below
+a threshold. DeeBERT~\cite{xin2020deebert} applied the same idea to BERT,
+inserting an exit after each transformer layer and reporting substantial
+inference savings with little loss in accuracy on standard classification
+tasks.
+
+\textbf{Model compression.} DistilBERT~\cite{sanh2019distilbert} takes the
+complementary approach of training a smaller student network to imitate a
+larger teacher, retaining most of BERT's language-understanding performance
+with 40\% fewer parameters and 60\% faster inference.
+
+\textbf{Cascades of language-model services.} FrugalGPT~\cite{chen2023frugalgpt}
+cascades LLM APIs of increasing price, accepting a cheaper model's answer when
+a learned scoring function judges it reliable. The authors report matching the
+strongest model's quality at a large reduction in cost.
+
+These works establish that confidence-based routing can preserve most of an
+expensive model's accuracy while avoiding most of its cost, provided the cheap
+stage's confidence is well calibrated. None of them, however, addresses
+AI-text detection, and none combines an \emph{interpretable feature-based}
+first stage with a transformer second stage.
+
+% ---------------------------------------------------------------------
+\section{Synthesis and Research Gap}
+% ---------------------------------------------------------------------
+
+Table~\ref{tab:lit-summary} brings together the representative approaches
+reviewed in this chapter. The accuracy and latency ratings are qualitative and
+relative to one another, reflecting the evidence reported in the cited works.
+
+\begin{table}[H]
+\caption{Summary of representative detection approaches and market tools}
+\label{tab:lit-summary}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{2.9cm}|p{2.3cm}|p{1.65cm}|p{1.65cm}|L|}
+\hline
+\textbf{Approach / Tool} & \textbf{Category} & \textbf{Accuracy} & \textbf{Latency} & \textbf{Key limitation} \\ \hline
+GLTR~\cite{gehrmann2019gltr} & Heuristic & Low--Mod. & Very low & Shallow feature depth \\ \hline
+DetectGPT~\cite{mitchell2023detectgpt} & Zero-shot curvature & Moderate & High & Many model calls per sample \\ \hline
+Fast-DetectGPT~\cite{bao2024fast} & Zero-shot curvature & High & Low--Mod. & Needs a large scoring LM \\ \hline
+Binoculars~\cite{hans2024binoculars} & Cross-perplexity & High & Moderate & Requires two LLMs \\ \hline
+Ghostbuster~\cite{verma2024ghostbuster} & Feature-based + linear & High & Moderate & Several LM passes \\ \hline
+RoBERTa / DeBERTa~\cite{liu2019roberta,he2023debertav3} & Fine-tuned transformer & Very high (in-domain) & High & GPU-dependent; weak transfer \\ \hline
+RADAR~\cite{hu2023radar} & Adversarial transformer & High & High & Large encoder; costly training \\ \hline
+Watermark~\cite{kirchenbauer2023watermark} & Generation-time & Very high & Very low & Needs provider cooperation \\ \hline
+Turnitin & Commercial LMS & High & Moderate & Black box, licence cost \\ \hline
+GPTZero & Commercial web & Mod.--High & Low--Mod. & False positives on formal text \\ \hline
+Copyleaks & Commercial API & High & Moderate & Cost per page \\ \hline
+Originality.ai & Commercial web & High (sensitive) & Moderate & High false-positive risk \\ \hline
+\textbf{VeriScript (this work)} & \textbf{Hybrid cascade} & \textbf{High (F1 0.971 on test)} & \textbf{Moderate (GPT-2 first stage)} & \textbf{First stage as costly as the second (Ch.~7)} \\ \hline
+\end{tabularx}
+\end{table}
+
+Five observations emerge from the review.
+\begin{enumerate}
+  \item \textbf{Methods are evaluated in isolation.} Academic work reports the
+        accuracy of individual detectors but rarely the accuracy--latency
+        trade-off that determines whether a detector can be deployed at
+        institutional scale.
+  \item \textbf{Cheap and accurate detectors are not combined.} Feature-based
+        detectors and fine-tuned transformers are presented as alternatives.
+        Although cascades and early exit are well established for reducing
+        inference cost in other fields~\cite{viola2001rapid,xin2020deebert,
+        chen2023frugalgpt}, no surveyed detection system routes documents
+        between an interpretable heuristic stage and a transformer stage on the
+        basis of calibrated confidence.
+  \item \textbf{Commercial tools are closed and costly.} The tools actually
+        used by institutions do not explain their decisions and charge per
+        licence or per page.
+  \item \textbf{Generalisation is weak.} Benchmarks consistently show large
+        accuracy drops on unseen generators, domains and attacks~\cite{wang2024m4,
+        li2024mage,dugan2024raid,krishna2023paraphrasing}.
+  \item \textbf{Fairness is under-evaluated.} Perplexity-based detection is
+        biased against non-native writers~\cite{liang2023biased}, yet few
+        systems measure false-positive disparity as part of their evaluation.
+\end{enumerate}
+
+\veriscript{} is designed to address these gaps together: an open,
+cost-aware, interpretable cascade that is evaluated jointly on accuracy,
+efficiency, cross-generator robustness and fairness. Chapter~\ref{ch:problem}
+turns these gaps into a formal problem statement and a set of objectives.

@@ -1,0 +1,536 @@
+% =====================================================================
+\chapter{Proposed Work}
+\label{ch:proposed}
+% =====================================================================
+
+\section{Introduction}
+
+This chapter presents the approach taken by \veriscript{} and justifies each
+design decision with reference to the literature reviewed in
+Chapter~\ref{ch:lit}. It then gives the methodology as a sequence of steps,
+states the training, inference and threshold-tuning procedures as algorithms,
+and describes each step in detail.
+
+\subsection{Overview of the Proposed Approach}
+
+\veriscript{} is a two-stage detector. Every document is first scored by a
+\emph{heuristic stage}: a small classifier over perplexity, burstiness and
+stylometric features whose output is calibrated into a probability $p_h(d)$.
+A \emph{confidence gate} then decides whether that probability is reliable
+enough to act on. If $p_h(d)$ is clearly low or clearly high, the decision is
+returned immediately together with the features that drove it. If $p_h(d)$
+lies inside the ambiguity band $[\Tlow,\Thigh]$, the document is passed to a
+\emph{transformer stage}, a fine-tuned RoBERTa-base (or DeBERTa-v3) classifier,
+whose probability $p_t(d)$ becomes the final answer. The band is not chosen
+by hand; it is tuned on a validation set to meet the accuracy and fairness
+constraints of Equation~\eqref{eq:optproblem} at the lowest expected cost.
+
+\subsection{Justification of the Design}
+
+\textbf{Why a cascade and not a single model?} The review of efficient
+inference showed that, when the difficulty of inputs varies, routing by
+confidence preserves most of an expensive model's accuracy while avoiding most
+of its cost~\cite{viola2001rapid,teerapittayanon2016branchynet,xin2020deebert,
+chen2023frugalgpt}. AI-text detection has exactly this property. Unedited
+output from a chat assistant is statistically very different from human text,
+while edited, paraphrased or very formal texts are hard. A single heuristic
+model would be wrong too often on the hard cases; a single transformer would
+waste computation on the easy ones.
+
+\textbf{Why a cascade and not an ensemble?} An alternative way of combining
+the two families is to run both on every document and average or stack their
+outputs. Such an ensemble may be slightly more accurate, but it always pays
+the full cost of the transformer, so it does not address problem P3. It also
+blurs the explanation, because every decision depends on the opaque model.
+The cascade preserves a clean separation: fast-path decisions are fully
+explainable by construction.
+
+\textbf{Why these heuristic features?} Perplexity and token-rank statistics are
+the most consistently useful zero-cost signals in the literature, from
+GLTR~\cite{gehrmann2019gltr} to Binoculars~\cite{hans2024binoculars}.
+Burstiness captures the uniformity of generated text that perplexity alone
+misses. Stylometric features are free to compute and were shown on HC3 to
+separate ChatGPT from human answers~\cite{guo2023hc3}. Learned combinations of
+such features, as in Ghostbuster~\cite{verma2024ghostbuster}, generalise better
+than any single statistic. The heuristic stage therefore uses one small
+reference language model (GPT-2 small, about 124 million parameters) to obtain
+all probability-based features in a single forward pass, and adds features that
+need no model at all. It deliberately avoids methods that need many model calls
+(DetectGPT~\cite{mitchell2023detectgpt}) or two large models
+(Binoculars), because the first stage must be cheap.
+
+\textbf{Why a linear or tree-based head?} Logistic regression gives a weight to
+every feature, so the contribution of each feature to a decision can be read
+off directly; gradient-boosted trees~\cite{chen2016xgboost} capture
+interactions between features (for example, low perplexity is more suspicious
+when burstiness is also low) at little extra cost. Both are trained in
+seconds and run in microseconds.
+
+\textbf{Why calibrate?} The gate compares $p_h(d)$ with fixed thresholds.
+Uncalibrated scores, especially from boosted trees, are systematically
+over- or under-confident~\cite{guo2017calibration}, which would make the
+thresholds meaningless and the escalation rate unpredictable. Platt
+scaling~\cite{platt1999probabilistic} or isotonic regression on a held-out
+split corrects this.
+
+\textbf{Why RoBERTa-base and DeBERTa-v3?} Fine-tuned RoBERTa has been the
+standard strong detector since the GPT-2 release~\cite{solaiman2019release} and
+remains a strong baseline on M4, MAGE and RAID~\cite{wang2024m4,li2024mage,
+dugan2024raid}. DeBERTa-v3~\cite{he2023debertav3} is generally stronger on
+classification tasks at similar size and is evaluated as an alternative. Both
+are base-sized models that can run on a CPU, which keeps the escalation path
+usable on modest institutional hardware. Larger models (RoBERTa-large as used by
+RADAR~\cite{hu2023radar}) are kept as an optional upgrade.
+
+\textbf{How does the design address fairness?} Liang \textit{et al.}
+showed that low perplexity and low lexical diversity drive false positives on
+non-native writing~\cite{liang2023biased}. In the cascade, a human essay that
+looks moderately predictable falls into the ambiguity band rather than being
+labelled AI-generated by the heuristic stage, because the band is tuned so that
+the fast path is used only where the heuristic is reliably correct. The
+fairness constraint in Equation~\eqref{eq:optproblem} makes this explicit: a
+band that achieves low cost by passing biased fast-path decisions is rejected
+during tuning.
+
+\subsection{Design Principles}
+
+The design follows five principles derived from the objectives:
+\begin{enumerate}
+  \item \textbf{Cheap by default}: every document pays only for the heuristic
+        stage unless there is a reason to pay more.
+  \item \textbf{Explain what you decide}: any decision made without the
+        transformer is accompanied by the feature values that produced it.
+  \item \textbf{Measure, do not assume}: thresholds, escalation rate,
+        generalisation and fairness are all measured on held-out data.
+  \item \textbf{Modularity}: the heuristic stage, the gate and the transformer
+        stage are independent components with fixed interfaces, so that either
+        model can be replaced (for example by Fast-DetectGPT features or by a
+        RADAR-style encoder) without changing the rest of the system.
+  \item \textbf{Local and open}: all components run locally on openly licensed
+        software; no document leaves the institution.
+\end{enumerate}
+
+% ---------------------------------------------------------------------
+\section{Proposed Methodology}
+% ---------------------------------------------------------------------
+
+The methodology is organised into three stages that correspond to objectives
+O1--O3, followed by evaluation (O4) and packaging (O5), as shown in
+Fig.~\ref{fig:methodology}. The steps are:
+
+\begin{description}[leftmargin=1.6cm,style=nextline,itemsep=3pt]
+  \item[Step 1:] \textbf{Corpus construction.} Assemble a balanced human/AI
+        corpus from HC3, M4 and RAID (with optional custom GPT-4, Claude and
+        Llama generations); stratify by domain and generator; create training,
+        validation, calibration and test splits, including a held-out
+        generator split.
+  \item[Step 2:] \textbf{Pre-processing.} Normalise text, segment sentences,
+        filter short or duplicated samples, and remove obvious artefacts
+        (for example ``As an AI language model'') that would make the task
+        trivially easy.
+  \item[Step 3:] \textbf{Heuristic feature extraction.} Compute perplexity,
+        token-rank, burstiness and stylometric features for every document.
+  \item[Step 4:] \textbf{Heuristic classifier training and calibration.} Train
+        logistic regression and gradient-boosted trees; calibrate the better
+        model on the calibration split to obtain $p_h(d)$.
+  \item[Step 5:] \textbf{Transformer fine-tuning.} Fine-tune RoBERTa-base
+        (DeBERTa-v3 is supported as an alternative) on the training split; keep
+        the checkpoint with the best validation F1; record latency.
+  \item[Step 6:] \textbf{Threshold tuning.} Search for the ambiguity band
+        $[\Tlow,\Thigh]$ that minimises expected cost subject to the accuracy
+        and fairness constraints on the validation split.
+  \item[Step 7:] \textbf{Cascade inference.} At run time, apply the heuristic
+        stage, the gate and, where needed, the transformer stage; produce the
+        label, probability, route and explanation.
+  \item[Step 8:] \textbf{Evaluation and packaging.} Evaluate the three systems
+        on the test splits; package the cascade as a CLI and web application.
+\end{description}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.45cm and 0.5cm]
+  \node[blk,text width=3.4cm] (data) {\textbf{Step 1--2}\\Corpus construction and pre-processing};
+  \node[blk,text width=3.1cm,right=1.0cm of data,yshift=1.3cm] (s1) {\textbf{Stage I (O1)}\\Steps 3--4: heuristic features, head, calibration};
+  \node[blk,text width=3.1cm,right=1.0cm of data,yshift=-1.3cm] (s2) {\textbf{Stage II (O2)}\\Step 5: transformer fine-tuning};
+  \node[blk,text width=3.0cm,right=1.0cm of s1,yshift=-1.3cm] (s3) {\textbf{Stage III (O3)}\\Steps 6--7: gate and threshold tuning};
+  \node[blk,text width=3.4cm,below=1.6cm of s3] (ev) {\textbf{Step 8 (O4)}\\Unified evaluation: accuracy, efficiency, generalisation, fairness};
+  \node[blk,text width=3.4cm,left=1.0cm of ev] (pk) {\textbf{Step 8 (O5)}\\Packaging: CLI and web demo};
+  \draw[arr] (data.east) -- ++(0.4,0) |- (s1.west);
+  \draw[arr] (data.east) -- ++(0.4,0) |- (s2.west);
+  \draw[arr] (s1.east) -- ++(0.3,0) |- (s3.west);
+  \draw[arr] (s2.east) -- ++(0.3,0) |- (s3.west);
+  \draw[arr] (s3) -- (ev);
+  \draw[arr] (ev) -- (pk);
+\end{tikzpicture}
+\caption{Overall methodology of the proposed work}
+\label{fig:methodology}
+\end{figure}
+
+\subsection{Training Procedure}
+
+Algorithm~\ref{alg:train} summarises how the two stages are trained. The
+corpus is split so that the calibration and validation sets are disjoint from
+the training set; otherwise the calibration would be fitted to over-confident
+in-sample predictions.
+
+\begin{algorithm}[H]
+\caption{Training the VeriScript components}
+\label{alg:train}
+\setstretch{1.15}
+\begin{algorithmic}[1]
+\Require Labelled corpus $\mathcal{D}$; reference LM $\theta_{\mathrm{ref}}$; pretrained encoder $\theta_{\mathrm{enc}}$
+\Ensure Calibrated heuristic model $g_h$; fine-tuned transformer $g_t$
+\State Split $\mathcal{D}$ into $\mathcal{D}_{tr}$, $\mathcal{D}_{cal}$, $\mathcal{D}_{val}$, $\mathcal{D}_{te}$ (stratified by generator and domain)
+\ForAll{$d \in \mathcal{D}$}
+   \State $\mathbf{h}(d) \gets \Call{ExtractFeatures}{d,\theta_{\mathrm{ref}}}$ \Comment{one LM forward pass}
+\EndFor
+\State Standardise features using statistics of $\mathcal{D}_{tr}$
+\State Train LR and GBDT heads on $\{(\mathbf{h}(d),y)\}_{d\in\mathcal{D}_{tr}}$
+\State Select the head with higher AUROC on $\mathcal{D}_{val}$
+\State Fit calibrator (Platt or isotonic) on $\mathcal{D}_{cal}$; $g_h \gets$ calibrated head
+\State Initialise $g_t$ from $\theta_{\mathrm{enc}}$ with a linear classification layer
+\For{epoch $= 1$ \textbf{to} $E$}
+   \ForAll{mini-batch $B \subset \mathcal{D}_{tr}$}
+      \State Minimise cross-entropy of $g_t$ on $B$ with AdamW
+   \EndFor
+   \State Evaluate F1 on $\mathcal{D}_{val}$; keep best checkpoint
+\EndFor
+\State \Return $g_h$, $g_t$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Cascade Inference Procedure}
+
+Algorithm~\ref{alg:infer} gives the inference procedure, which implements
+Equation~\eqref{eq:cascade}, and Fig.~\ref{fig:flowchart} shows the same
+logic as a flowchart.
+
+\begin{algorithm}[H]
+\caption{Confidence-gated cascade inference}
+\label{alg:infer}
+\setstretch{1.15}
+\begin{algorithmic}[1]
+\Require Document $d$; models $g_h$, $g_t$; band $[\Tlow,\Thigh]$; threshold $\tau$
+\Ensure Label $\hat{y}$, probability $p$, route $r$, explanation $e$
+\State $d \gets \Call{Preprocess}{d}$
+\If{$\Call{WordCount}{d} < 100$}
+   \State \Return (\textsc{Undetermined}, --, --, ``insufficient text'')
+\EndIf
+\State $\mathbf{h} \gets \Call{ExtractFeatures}{d}$;\quad $p_h \gets g_h(\mathbf{h})$
+\If{$p_h < \Tlow$ \textbf{or} $p_h > \Thigh$}
+   \State $p \gets p_h$;\quad $r \gets$ \texttt{fast\_path}
+   \State $e \gets \Call{TopFeatures}{g_h,\mathbf{h},k=5}$
+\Else
+   \State $W \gets \Call{SlidingWindows}{d, L=512, \text{stride}=384}$
+   \State $p \gets \frac{1}{|W|}\sum_{w\in W} g_t(w)$;\quad $r \gets$ \texttt{escalated}
+   \State $e \gets \{\,p_h,\ p,\ \Call{TopFeatures}{g_h,\mathbf{h},k=5}\,\}$
+\EndIf
+\State $\hat{y} \gets \mathbb{1}[p \ge \tau]$
+\State \Return $(\hat{y}, p, r, e)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.55cm and 0.9cm]
+  \node[term] (start) {Start};
+  \node[io,below=of start] (in) {Read document $d$};
+  \node[blk,below=of in,text width=4.2cm] (pre) {Pre-process: normalise, split sentences};
+  \node[dec,below=of pre] (len) {Words $\ge$ 100?};
+  \node[term,right=1.2cm of len] (short) {Report ``insufficient text''};
+  \node[blk,below=of len,text width=4.2cm] (feat) {Extract features $\mathbf{h}(d)$; compute $p_h(d)$};
+  \node[dec,below=of feat] (gate) {$\Tlow \le p_h \le \Thigh$?};
+  \node[blk,left=1.0cm of gate,text width=3.1cm,yshift=-1.6cm] (fast) {Fast path:\\$p \gets p_h$;\\explain top features};
+  \node[blk,right=1.0cm of gate,text width=3.1cm,yshift=-1.6cm] (esc) {Escalate:\\windowed transformer;\\$p \gets p_t$};
+  \node[blk,below=2.5cm of gate,text width=4.2cm] (dec) {$\hat{y} \gets \mathbb{1}[p \ge \tau]$; log route and latency};
+  \node[io,below=of dec] (out) {Output label, $p$, route, explanation};
+  \node[term,below=of out] (stop) {Stop};
+  \draw[arr] (start) -- (in);
+  \draw[arr] (in) -- (pre);
+  \draw[arr] (pre) -- (len);
+  \draw[arr] (len) -- node[lbl,above] {No} (short);
+  \draw[arr] (len) -- node[lbl,right] {Yes} (feat);
+  \draw[arr] (feat) -- (gate);
+  \draw[arr] (gate.west) -| node[lbl,above,pos=0.25] {No} (fast.north);
+  \draw[arr] (gate.east) -| node[lbl,above,pos=0.25] {Yes} (esc.north);
+  \draw[arr] (fast.south) |- (dec.west);
+  \draw[arr] (esc.south) |- (dec.east);
+  \draw[arr] (dec) -- (out);
+  \draw[arr] (out) -- (stop);
+\end{tikzpicture}
+\caption{Flowchart of the VeriScript cascade inference algorithm}
+\label{fig:flowchart}
+\end{figure}
+
+\subsection{Threshold Tuning Procedure}
+
+The ambiguity band is selected by a grid search on the validation set, as in
+Algorithm~\ref{alg:tune}. For each candidate band the escalation rate,
+cascade F1 and fairness disparity are computed using the already-stored
+predictions of both stages, so the search requires no further model inference
+and finishes in seconds.
+
+\begin{algorithm}[H]
+\caption{Validation-based tuning of the ambiguity band}
+\label{alg:tune}
+\setstretch{1.15}
+\begin{algorithmic}[1]
+\Require Validation predictions $\{(p_h(d), p_t(d), y, g)\}$ where $g$ marks native/non-native; tolerances $\varepsilon$, $\delta$; grid step $s$
+\Ensure Band $(\Tlow^{*},\Thigh^{*})$
+\State $F_1^{t} \gets$ F1 of the transformer-only detector on the validation set
+\State $best \gets (0,1)$;\quad $\alpha_{best} \gets 1$
+\For{$\Tlow \gets 0$ \textbf{to} $0.5$ \textbf{step} $s$}
+  \For{$\Thigh \gets 0.5$ \textbf{to} $1$ \textbf{step} $s$}
+     \State Form cascade predictions by Eq.~\eqref{eq:cascade}
+     \State Compute $\alpha$, $F_1^{c}$ and $\Delta_{FPR}$
+     \If{$F_1^{c} \ge F_1^{t}-\varepsilon$ \textbf{and} $\Delta_{FPR} \le \delta$ \textbf{and} $\alpha < \alpha_{best}$}
+        \State $best \gets (\Tlow,\Thigh)$;\quad $\alpha_{best} \gets \alpha$
+     \EndIf
+  \EndFor
+\EndFor
+\State \Return $best$
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Form of the fairness constraint.} Algorithm~\ref{alg:tune} is written
+with the disparity constraint $\Delta_{FPR} \le \delta$ of
+Eq.~\eqref{eq:optproblem}. A disparity bound alone has a weakness: it can be
+satisfied by making the detector \emph{worse} for the better-served group,
+for example by raising the false positive rate on native writing until it
+matches the rate on non-native writing. The implementation therefore offers
+two forms of the constraint, evaluated on a fairness validation set of native
+and non-native human essays that is disjoint from the fairness test set:
+\begin{itemize}
+  \item \emph{disparity}: $\Delta_{FPR} \le \delta$, with $\delta$ equal to the
+        transformer-only disparity plus one standard error of that estimate
+        (the fairness sets are small, so the reference disparity is itself
+        uncertain), and additionally
+        $\mathrm{FPR}^{c}_{\text{non-native}} \le \mathrm{FPR}^{t}_{\text{non-native}}$;
+  \item \emph{worst-group} (default): the cascade must not flag non-native
+        writers more often than the transformer-only detector,
+        $\mathrm{FPR}^{c}_{\text{non-native}} \le \mathrm{FPR}^{t}_{\text{non-native}}$,
+        which is the second half of hypothesis H4 and cannot be met by harming
+        the native group.
+\end{itemize}
+Among bands that satisfy the constraints, ties in escalation rate are broken
+in favour of the higher validation F1. Chapter~\ref{ch:results} explains,
+with measured numbers, why the worst-group form was adopted for deployment
+and reports the bands selected by both forms.
+
+% ---------------------------------------------------------------------
+\section{Description of Each Step}
+% ---------------------------------------------------------------------
+
+\subsection{Corpus Construction and Pre-processing (Steps 1--2)}
+
+The corpus combines public benchmarks (and, optionally, custom generations),
+as detailed in Chapter~6. Three principles guide its construction. First,
+\emph{balance}: human and AI classes are of equal size within each domain and
+length bucket, so that the classifier cannot exploit class priors that differ
+by topic or length. Second, \emph{diversity}: AI text comes from several
+generator families (the GPT family including ChatGPT and GPT-4, Cohere, Dolly,
+BLOOMZ, Flan-T5, Llama, MPT and Mistral) and several decoding settings,
+because detectors trained on one generator transfer
+poorly~\cite{dugan2024raid,wang2024m4}. Third, \emph{held-out evaluation}: one
+generator family is removed entirely from training and calibration and is used
+only for testing, which implements the leave-one-generator-out protocol.
+
+Pre-processing applies Unicode normalisation (NFKC), collapses whitespace,
+strips HTML or Markdown markup and removes boilerplate phrases that reveal the
+source trivially, such as refusal templates. Documents shorter than 100 words
+are excluded from training, and near-duplicates are removed by hashing
+normalised text so that the same answer cannot appear in both training and
+test sets. Long documents are kept intact for feature extraction; for the
+transformer they are split into windows at inference time.
+
+\subsection{Heuristic Feature Extraction (Step 3)}
+
+Each document is passed once through the reference model (GPT-2 small) to
+obtain the log-probability, rank and predictive entropy of every token. From
+these and from the raw text, the features in Table~\ref{tab:features} are
+computed.
+
+\begin{table}[H]
+\caption{Heuristic features computed for each document}
+\label{tab:features}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{0.6cm}|p{3.6cm}|L|p{2.1cm}|}
+\hline
+\textbf{No.} & \textbf{Feature} & \textbf{Definition} & \textbf{Group} \\ \hline
+1 & Mean log-probability & $\frac{1}{N}\sum_i \log P(x_i\mid x_{<i})$ & Perplexity \\ \hline
+2 & Document perplexity & Eq.~\eqref{eq:perplexity} & Perplexity \\ \hline
+3 & Std.\ of token log-prob & Spread of per-token log-probabilities & Perplexity \\ \hline
+4 & Min.\ sentence perplexity & Lowest perplexity over sentences & Perplexity \\ \hline
+5 & Max.\ sentence perplexity & Highest perplexity over sentences & Perplexity \\ \hline
+6 & Top-10 rank fraction & Share of tokens ranked in the top 10 & Rank (GLTR) \\ \hline
+7 & Top-100 rank fraction & Share of tokens ranked 11--100 & Rank (GLTR) \\ \hline
+8 & Tail rank fraction & Share of tokens ranked above 1000 & Rank (GLTR) \\ \hline
+9 & Mean predictive entropy & Average of $H_i$ (Eq.~\eqref{eq:entropy}) & Entropy \\ \hline
+10 & Sentence-length burstiness & $\beta$ of Eq.~\eqref{eq:burstiness} & Burstiness \\ \hline
+11 & Perplexity burstiness & Coefficient of variation of sentence perplexities & Burstiness \\ \hline
+12 & Type-token ratio & Eq.~\eqref{eq:ttr}, on the first 200 words & Stylometric \\ \hline
+13 & Mean word length & Average characters per word & Stylometric \\ \hline
+14 & Function-word rate & Share of tokens in a function-word list & Stylometric \\ \hline
+15 & Punctuation profile & Rates of commas, semicolons, colons, dashes per sentence & Stylometric \\ \hline
+16 & POS bigram profile & Normalised counts of the 20 most informative POS bigrams & Stylometric \\ \hline
+\end{tabularx}
+\end{table}
+
+Two details matter for robustness. The type-token ratio is computed on a
+fixed-length prefix because TTR falls with document length; computing it on
+the whole document would make it a proxy for length. Sentence-level perplexity
+statistics are computed only over sentences of at least five tokens to avoid
+noise from headings and fragments. All features are standardised using the
+mean and standard deviation of the training split:
+\begin{equation}
+  \tilde{h}_j(d) = \frac{h_j(d) - \mu_j}{\sigma_j}.
+  \label{eq:standardise}
+\end{equation}
+
+\subsection{Heuristic Classifier and Calibration (Step 4)}
+
+\textbf{Logistic regression.} The baseline head is an $\ell_2$-regularised
+logistic regression,
+\begin{equation}
+  s_h(d) = \sigma\!\left(\mathbf{w}^{\top}\tilde{\mathbf{h}}(d) + b\right),
+  \label{eq:lr}
+\end{equation}
+trained by minimising the regularised log-loss
+\begin{equation}
+  \mathcal{L}(\mathbf{w},b) = -\frac{1}{n}\sum_{k=1}^{n}\Big[y_k \log s_h(d_k) + (1-y_k)\log\big(1-s_h(d_k)\big)\Big] + \frac{\lambda_2}{2}\lVert\mathbf{w}\rVert_2^2 .
+  \label{eq:logloss}
+\end{equation}
+
+\textbf{Gradient-boosted trees.} The second head is an ensemble of $M$
+regression trees built stagewise~\cite{chen2016xgboost}:
+\begin{equation}
+  F_M(\tilde{\mathbf{h}}) = \sum_{m=1}^{M} \eta\, f_m(\tilde{\mathbf{h}}), \qquad
+  s_h(d) = \sigma\!\big(F_M(\tilde{\mathbf{h}}(d))\big),
+  \label{eq:gbdt}
+\end{equation}
+where each tree $f_m$ is fitted to the gradient of the log-loss of the current
+ensemble and $\eta$ is the learning rate. Tree depth, number of trees and
+learning rate are chosen by cross-validation on the training split.
+
+\textbf{Calibration.} The selected head's score is calibrated on the
+calibration split with Platt scaling (Eq.~\eqref{eq:platt}), or with isotonic
+regression if the calibration split is large enough. Calibration quality is
+checked with the expected calibration error,
+\begin{equation}
+  \mathrm{ECE} = \sum_{b=1}^{B} \frac{|S_b|}{n}\,\big|\,\mathrm{acc}(S_b) - \mathrm{conf}(S_b)\,\big|,
+  \label{eq:ece}
+\end{equation}
+where $S_b$ is the set of documents whose predicted probability falls in the
+$b$-th of $B$ equal-width bins~\cite{guo2017calibration}. The calibrated output
+is $p_h(d)$.
+
+\subsection{Transformer Fine-Tuning (Step 5)}
+
+RoBERTa-base is fine-tuned with a linear classification layer on the pooled
+first-token representation (Eq.~\eqref{eq:clshead}), using the binary
+cross-entropy loss and the AdamW optimiser~\cite{loshchilov2019adamw} with a
+linear learning-rate warm-up followed by linear decay. Training documents
+longer than the maximum sequence length $L=512$ are truncated to their first
+$L$ tokens during training. At inference, a long document is split into
+overlapping windows $w_1,\ldots,w_K$ of length $L$ with a stride of 384 tokens,
+and the window probabilities are averaged:
+\begin{equation}
+  p_t(d) = \frac{1}{K}\sum_{k=1}^{K} \sigma\!\left(\mathbf{w}_t^{\top}\mathbf{h}_{\mathrm{CLS}}(w_k) + b_t\right).
+  \label{eq:windows}
+\end{equation}
+The same procedure applies unchanged to DeBERTa-v3-base, which the
+implementation supports through a single command-line option; in the
+experiments reported here only RoBERTa-base was trained (Chapter~6 gives the
+reason). The hyperparameters used are listed in Chapter~6.
+
+\subsection{Confidence Gate and Threshold Tuning (Step 6)}
+
+The gate divides the probability axis into three regions, shown in
+Fig.~\ref{fig:band}. Documents whose $p_h(d)$ falls below $\Tlow$ are labelled
+human-written on the fast path; those above $\Thigh$ are labelled AI-generated
+on the fast path; those between are escalated. The band need not be symmetric
+around 0.5. Because a false accusation is more costly than a missed detection
+in the academic setting, the tuning procedure typically places $\Thigh$ further
+from 0.5 than $\Tlow$, so that the heuristic is allowed to label a document
+as AI-generated only when it is very confident.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=12cm,y=1cm]
+  \fill[pattern=north east lines] (0.30,0) rectangle (0.82,0.6);
+  \draw[thick] (0,0) -- (1,0);
+  \draw[thick] (0,0.6) -- (1,0.6);
+  \draw[thick] (0,0) -- (0,0.6) (1,0) -- (1,0.6);
+  \draw[very thick] (0.30,-0.2) -- (0.30,0.8);
+  \draw[very thick] (0.82,-0.2) -- (0.82,0.8);
+  \node[below] at (0,-0.05) {0};
+  \node[below] at (1,-0.05) {1};
+  \node[below] at (0.30,-0.2) {$\Tlow$};
+  \node[below] at (0.82,-0.2) {$\Thigh$};
+  \node[below] at (0.56,-0.85) {calibrated heuristic probability $p_h(d)$};
+  \node[above,font=\small,align=center] at (0.15,0.75) {Fast path:\\human-written};
+  \node[above,font=\small,align=center] at (0.56,0.75) {Escalate to transformer\\(ambiguity band)};
+  \node[above,font=\small,align=center] at (0.91,0.75) {Fast path:\\AI-generated};
+\end{tikzpicture}
+\caption{Partition of the heuristic probability axis by the confidence gate (illustrative band)}
+\label{fig:band}
+\end{figure}
+
+An equivalent unconstrained form of the tuning objective, useful for plotting
+the trade-off curve, is the Lagrangian
+\begin{equation}
+  J(\Tlow,\Thigh) = \big(1 - F_1^{\text{cascade}}\big) + \lambda\,\frac{\mathbb{E}[C]}{C_h + C_t},
+  \label{eq:lagrangian}
+\end{equation}
+where $\lambda \ge 0$ sets how much accuracy the institution is willing to
+trade for a unit of relative cost. Sweeping $\lambda$ traces a curve of
+operating points from the heuristic-only system ($\lambda$ large) to the
+transformer-only system ($\lambda = 0$). Instead of one fixed setting,
+\veriscript{} can therefore offer a small menu of operating points, for
+example ``fast'', ``balanced'' and ``thorough'', each with its measured
+escalation rate, accuracy and latency.
+
+\subsection{Explanation Generation (Step 7)}
+
+For fast-path decisions made by the logistic-regression head, the contribution
+of feature $j$ to the log-odds is exactly $c_j = w_j\,\tilde{h}_j(d)$, so the
+explanation lists the $k$ features with the largest $|c_j|$ together with their
+raw values and their typical ranges for human and AI text in the training
+data, for example: ``perplexity 11.2 (human texts in training: median 34)''.
+For the gradient-boosted head, per-feature contributions are obtained from the
+tree structure using the path-based attribution built into the XGBoost
+library. For escalated decisions the explanation reports the transformer
+probability together with the heuristic context, and states clearly that the
+decision was made by the neural model. In all cases the output includes a
+reminder that the result is a probability and should be reviewed by a person.
+
+\subsection{Evaluation and Packaging (Step 8)}
+
+The three systems (heuristic-only, transformer-only and cascade) are evaluated
+on identical test splits for accuracy (Precision, Recall, F1, AUROC),
+efficiency (mean and p95 latency, throughput, model size), cross-generator
+generalisation (leave-one-generator-out) and fairness (false-positive-rate
+disparity on non-native writing). The principal figure of merit is the
+fraction of the transformer's accuracy advantage over the heuristic that the
+cascade recovers, per unit of latency saved:
+\begin{equation}
+  \text{Recovery} = \frac{F_1^{\text{cascade}} - F_1^{\text{heuristic}}}{F_1^{\text{transformer}} - F_1^{\text{heuristic}}},
+  \qquad
+  \text{Speed-up} = \frac{\bar{t}_{\text{transformer}}}{\bar{t}_{\text{cascade}}}.
+  \label{eq:recovery}
+\end{equation}
+The packaged system exposes the cascade through a command line tool for batch
+processing and a web interface for single documents, as described in
+Chapters~\ref{ch:design} and~6.
+
+\section{Summary}
+
+This chapter presented the proposed confidence-gated cascade and justified its
+components using the literature: a single-pass heuristic stage over sixteen
+interpretable features, calibrated so that its probability can be thresholded;
+a fine-tuned RoBERTa-base or DeBERTa-v3 classifier for ambiguous documents;
+and a validation-based search for the ambiguity band under accuracy and
+fairness constraints. The training, inference and tuning procedures were given
+as algorithms, and each step was described. The next chapter specifies the
+system that implements this methodology.
