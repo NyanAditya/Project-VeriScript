@@ -114,7 +114,20 @@ class Preprocessor:
         nlp = self._get_nlp()
         if nlp is None:
             return self._regex_analyze(text)
-        doc = nlp(text)
+        return self._from_doc(text, nlp(text))
+
+    def analyze_many(self, texts: list[str], batch_size: int = 64):
+        """Batched analysis (spaCy nlp.pipe); yields Analysis objects in order."""
+        nlp = self._get_nlp()
+        if nlp is None:
+            for t in texts:
+                yield self._regex_analyze(t)
+            return
+        for t, doc in zip(texts, nlp.pipe(texts, batch_size=batch_size)):
+            yield self._from_doc(t, doc)
+
+    @staticmethod
+    def _from_doc(text: str, doc) -> Analysis:
         sents: list[Sentence] = []
         for s in doc.sents:
             toks = [t for t in s if not t.is_space]
