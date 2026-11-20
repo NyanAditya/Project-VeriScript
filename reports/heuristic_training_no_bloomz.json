@@ -1,0 +1,47 @@
+{
+  "n_features": 38,
+  "pos_bigrams": [
+    "pos_bigram:PUNCT_PUNCT",
+    "pos_bigram:ADV_PRON",
+    "pos_bigram:NOUN_CCONJ",
+    "pos_bigram:NOUN_DET",
+    "pos_bigram:ADJ_PART",
+    "pos_bigram:NOUN_PART",
+    "pos_bigram:CCONJ_NOUN",
+    "pos_bigram:ADV_DET",
+    "pos_bigram:ADV_ADV",
+    "pos_bigram:PUNCT_ADV",
+    "pos_bigram:PART_VERB",
+    "pos_bigram:NOUN_ADV",
+    "pos_bigram:AUX_ADJ",
+    "pos_bigram:DET_NOUN",
+    "pos_bigram:ADV_ADP",
+    "pos_bigram:NOUN_NUM",
+    "pos_bigram:PRON_VERB",
+    "pos_bigram:DET_NUM",
+    "pos_bigram:PUNCT_X",
+    "pos_bigram:VERB_DET"
+  ],
+  "heads": {
+    "lr": {
+      "C": 10,
+      "cv_auroc": 0.9737107605820225,
+      "val_auroc": 0.9702451915434747
+    },
+    "xgb": {
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "min_child_weight": 3.0,
+      "reg_lambda": 10.0,
+      "n_trees": 720,
+      "val_auroc": 0.9928909596291571
+    }
+  },
+  "selected_head": "xgb",
+  "val_ece": {
+    "none": 0.006457821071059036,
+    "platt": 0.00542093990592023,
+    "isotonic": 0.004575853371998265
+  },
+  "selected_calibrator": "isotonic"
+}
