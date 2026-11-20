@@ -9,3 +9,4 @@ models/
 reports/runs/
 *.log
 .env
+.claude/
