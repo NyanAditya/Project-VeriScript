@@ -1,0 +1,43 @@
+% ---------------- Nomenclature (Annexure 7) -----------------------
+\chapter*{NOMENCLATURE}
+\addcontentsline{toc}{chapter}{NOMENCLATURE}
+\begingroup
+\renewcommand{\arraystretch}{1.18}
+\textbf{English Symbols}\par
+\begin{longtable}{@{}p{3.0cm}p{11.0cm}@{}}
+$d$                 & Input document (sequence of tokens) \\
+$x_i$               & The $i$-th token of a document \\
+$N$                 & Number of tokens in a document \\
+$S$                 & Number of sentences in a document \\
+$\ell_j$            & Length (in tokens) of the $j$-th sentence \\
+$V$                 & Number of distinct word types in a document \\
+$\mathbf{h}(d)$     & Heuristic feature vector of document $d$ \\
+$\mathbf{w}, b$     & Weight vector and bias of the logistic-regression head \\
+$p_h(d)$            & Calibrated probability that $d$ is AI-generated (heuristic stage) \\
+$p_t(d)$            & Probability that $d$ is AI-generated (transformer stage) \\
+$p(d)$              & Final probability returned by the cascade \\
+$f(d)$              & Final binary label: 0 = human-written, 1 = AI-generated \\
+$\Tlow$, $\Thigh$   & Lower and upper limits of the ambiguity (escalation) band \\
+$C_h$, $C_t$        & Per-document inference cost of heuristic and transformer stages \\
+$C(d)$              & Total inference cost incurred for document $d$ \\
+$\mathbb{E}[C]$     & Expected per-document cost of the cascade \\
+$L$                 & Maximum input sequence length of the transformer (tokens) \\
+$\mathcal{D}$       & Labelled corpus; $\mathcal{D}_{tr}$, $\mathcal{D}_{val}$, $\mathcal{D}_{te}$ its splits \\
+$\mathcal{G}$       & Set of generator sources (GPT-4, Claude, Llama, \ldots) \\
+$P$, $R$, $F_1$     & Precision, Recall and F1-score \\
+\end{longtable}
+
+\textbf{Greek Symbols}\par
+\begin{longtable}{@{}p{3.0cm}p{11.0cm}@{}}
+$\alpha$            & Escalation rate (fraction of documents sent to the transformer) \\
+$\beta$             & Burstiness coefficient of sentence lengths \\
+$\mu_\ell$, $\sigma_\ell$ & Mean and standard deviation of sentence lengths \\
+$\lambda$           & Trade-off weight between accuracy loss and cost in threshold tuning \\
+$\varepsilon$       & Maximum tolerated drop in F1 relative to the transformer baseline \\
+$\sigma(\cdot)$     & Logistic sigmoid function \\
+$\theta$            & Parameters of the reference or encoder language model \\
+$\tau$              & Decision threshold on a probability score (default 0.5) \\
+$\Delta_{FPR}$      & False-positive-rate disparity between non-native and native writing \\
+\end{longtable}
+\endgroup
+\clearpage

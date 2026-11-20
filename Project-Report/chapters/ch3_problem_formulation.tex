@@ -1,0 +1,513 @@
+% =====================================================================
+\chapter{Problem Formulation}
+\label{ch:problem}
+% =====================================================================
+
+This chapter turns the gaps identified in the literature review into a
+precise problem. It describes the problem domain and the stakeholders,
+states the problem in plain terms and in formal terms, depicts the inputs,
+processes and outputs of the intended system, and lists the objectives
+together with measurable success criteria.
+
+% ---------------------------------------------------------------------
+\section{Description of the Problem Domain}
+% ---------------------------------------------------------------------
+
+\subsection{Stakeholders and Their Requirements}
+
+The intended users of an AI-text detector have different but overlapping
+needs.
+\begin{itemize}
+  \item \textbf{Faculty and examiners} need to screen a whole batch of
+        submissions at the end of an assignment cycle, quickly and without
+        sending student work to an external service. When a submission is
+        flagged they need to understand why, so that they can discuss it with
+        the student.
+  \item \textbf{Students} need protection from false accusations. A detector
+        that flags honest work, and especially one that does so more often for
+        some groups of students than for others, causes real harm.
+  \item \textbf{Institutions} need a tool whose cost does not grow with the
+        number of pages checked, which can run on ordinary hardware, and whose
+        decisions can be audited if a case is appealed.
+  \item \textbf{Publishers and platforms} need throughput: a detector that can
+        triage large volumes of text and pass only questionable items to
+        human moderators.
+\end{itemize}
+Taken together, these requirements describe a detector that is
+\emph{accurate}, \emph{cheap per document}, \emph{explainable},
+\emph{robust to new generators} and \emph{fair}. Chapter~\ref{ch:lit} showed
+that no existing system offers all five properties.
+
+\subsection{Identified Research Gaps}
+
+The literature review leads to five interlinked limitations of current
+detection tools. Each is stated below as a problem (P1--P5).
+
+\textbf{P1 -- The black-box problem.} Leading commercial platforms such as
+Turnitin and Copyleaks return a probability or a percentage without
+disclosing the features or the decision process behind it. Academic
+institutions cannot audit individual decisions, and a student has no concrete
+evidence to respond to.
+
+\textbf{P2 -- Cost and licensing barriers.} Institutional licences and
+per-page API pricing put bulk evaluation out of reach for smaller
+institutions and independent reviewers, and make cost grow linearly with
+volume.
+
+\textbf{P3 -- Latency at institutional scale.} Running a full transformer
+classifier on thousands of submissions is a computational bottleneck,
+particularly for institutions without GPU hardware. Zero-shot methods such as
+DetectGPT are even more expensive per document~\cite{mitchell2023detectgpt}.
+
+\textbf{P4 -- Domain and generator overfitting.} Detectors calibrated on the
+output of one generator (for example ChatGPT) lose much of their accuracy on
+new generators such as Claude or Llama, on new domains and on paraphrased
+text~\cite{dugan2024raid,wang2024m4,li2024mage,krishna2023paraphrasing}.
+
+\textbf{P5 -- Bias and fairness risk.} Perplexity- and diversity-based
+heuristics disproportionately flag the writing of non-native English speakers,
+whose prose tends to be more predictable to a language model~\cite{liang2023biased}.
+This creates ethical and legal risk whenever detector output is used in
+academic evaluation.
+
+Fig.~\ref{fig:gapmap} shows how these problems arise from the two existing
+families of detectors and how they meet in the deployment gap that this
+project addresses.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.6cm and 0.6cm]
+  \node[blk,text width=4.5cm,minimum height=1.3cm] (heu) {\textbf{Heuristic detectors}\\fast, cheap, interpretable};
+  \node[blk,text width=4.5cm,minimum height=1.3cm,right=2.4cm of heu] (tra) {\textbf{Transformer detectors}\\accurate in-domain};
+  \node[blk,text width=4.5cm,below=0.7cm of heu] (hl) {Shallow; affected by genre and writer proficiency (P4, P5)};
+  \node[blk,text width=4.5cm,below=0.7cm of tra] (tl) {Slow, costly, opaque in commercial form (P1, P2, P3)};
+  \node[blk,thick,double,text width=9.0cm,minimum height=1.4cm] (gap) at ($(hl.south)!0.5!(tl.south)+(0,-1.5)$)
+      {\textbf{Deployment gap:} institutions must choose between a fast but shallow detector and an accurate but slow, expensive and opaque one};
+  \node[blk,text width=9.0cm,below=0.7cm of gap] (vs) {\textbf{VeriScript:} confidence-gated cascade that uses each family where it is most effective};
+  \draw[arr] (heu) -- (hl);
+  \draw[arr] (tra) -- (tl);
+  \draw[arr] (hl.south) -- (gap.north -| hl.south);
+  \draw[arr] (tl.south) -- (gap.north -| tl.south);
+  \draw[arr] (gap) -- (vs);
+\end{tikzpicture}
+\caption{Origin of the research gap addressed by VeriScript}
+\label{fig:gapmap}
+\end{figure}
+
+\subsection{Why a Cascade Is the Appropriate Response}
+
+The difficulty of detection varies widely across documents. A long,
+unedited answer produced by a chat assistant with default settings is
+usually easy to identify from its perplexity and uniformity alone. A short,
+heavily edited or paraphrased text, or a carefully written human essay in a
+formal register, is much harder. If most documents in a realistic batch are
+easy, then running the most expensive model on all of them wastes most of
+the computation.
+
+A cascade addresses P3 directly by spending transformer computation only on
+hard documents, and P2 indirectly because an open system that runs on local
+hardware has no per-page charge. It addresses P1 because every decision made
+on the fast path comes with an explicit feature-level justification. It
+mitigates P5 because a heuristic that is uncertain does not decide: borderline
+documents, which is where bias in surface statistics is most likely to change
+the outcome, are referred to a model that reads the full context. Finally, the
+cascade does not solve P4 by itself, but because the thresholds are tuned on
+validation data and the evaluation includes held-out generators, the
+system's behaviour on unseen sources is measured rather than assumed.
+
+% ---------------------------------------------------------------------
+\section{Problem Statement}
+% ---------------------------------------------------------------------
+
+\subsection{Informal Statement}
+
+\begin{center}
+\fbox{\parbox{0.92\textwidth}{\setstretch{1.3}
+\emph{To design, implement and evaluate an open, interpretable system that
+classifies an English document as human-written or AI-generated with accuracy
+close to that of a fine-tuned transformer classifier, at an average inference
+cost close to that of a lightweight heuristic detector, by routing each
+document through a confidence-gated cascade, and to verify that the system
+generalises to unseen generators and does not disproportionately flag
+non-native English writing.}}}
+\end{center}
+
+\subsection{Formal Statement}
+
+Let $d$ denote an input document and $y \in \{0,1\}$ its true label, with
+$y=0$ for human-written and $y=1$ for AI-generated text. The system must learn
+a decision function
+\begin{equation}
+  f : d \;\mapsto\; \big(\hat{y},\, p(d)\big), \qquad \hat{y}\in\{0,1\},\;\; p(d)\in[0,1],
+  \label{eq:fdef}
+\end{equation}
+where $p(d)$ is a calibrated estimate of $P(y=1 \mid d)$.
+
+The cascade has two component models. The heuristic stage computes a feature
+vector $\mathbf{h}(d)$ and a calibrated probability $p_h(d)$ at cost $C_h$;
+the transformer stage computes $p_t(d)$ at cost $C_t \gg C_h$. Given an
+ambiguity band $[\Tlow,\Thigh]$ with $0 \le \Tlow \le \Thigh \le 1$, the
+cascade output is
+\begin{equation}
+  p(d) \;=\;
+  \begin{cases}
+     p_h(d), & \text{if } p_h(d) < \Tlow \;\text{ or }\; p_h(d) > \Thigh \quad\text{(fast path)},\\[2pt]
+     p_t(d), & \text{if } \Tlow \le p_h(d) \le \Thigh \quad\text{(escalation)},
+  \end{cases}
+  \label{eq:cascade}
+\end{equation}
+and $\hat{y} = \mathbb{1}[\,p(d) \ge \tau\,]$ with decision threshold
+$\tau$ (0.5 by default). The cost incurred for document $d$ is
+\begin{equation}
+  C(d) \;=\; C_h + \mathbb{1}\!\left[\Tlow \le p_h(d) \le \Thigh\right] C_t ,
+  \label{eq:costd}
+\end{equation}
+so that the expected cost over the input distribution is
+$\mathbb{E}[C] = C_h + \alpha\, C_t$, where
+$\alpha = P(\Tlow \le p_h(d) \le \Thigh)$ is the \emph{escalation rate}.
+
+The design problem is to choose the band so as to minimise expected cost
+while keeping accuracy close to the transformer-only detector and keeping the
+fairness disparity small:
+\begin{equation}
+\begin{aligned}
+  \min_{\Tlow,\,\Thigh}\quad & \mathbb{E}[C(d)] \\
+  \text{subject to}\quad & F_1^{\text{cascade}} \;\ge\; F_1^{\text{transformer}} - \varepsilon, \\
+  & \Delta_{FPR} \;=\; \big|\,\mathrm{FPR}_{\text{non-native}} - \mathrm{FPR}_{\text{native}}\,\big| \;\le\; \delta ,
+\end{aligned}
+\label{eq:optproblem}
+\end{equation}
+where $\varepsilon$ is the largest acceptable loss in F1 relative to the
+transformer-only baseline and $\delta$ is the largest acceptable
+false-positive-rate disparity. Two limiting cases illustrate the trade-off:
+with $\Tlow = 0$ and $\Thigh = 1$ every document is escalated ($\alpha=1$) and
+the cascade reduces to the transformer-only detector at cost $C_h + C_t$;
+with $\Tlow = \Thigh$ no document is escalated ($\alpha \approx 0$) and the
+cascade reduces to the heuristic-only detector at cost $C_h$. The useful
+operating points lie between these extremes.
+
+Note that the cost objective is measured relative to the
+\emph{transformer-only} detector, which is the system whose accuracy the
+cascade aims to retain, and that accuracy is measured relative to the same
+baseline; the heuristic-only detector is the lower bound on cost.
+
+\subsection{Assumptions and Constraints}
+
+The formulation rests on the following assumptions.
+\begin{enumerate}
+  \item Documents are in English and contain at least about 100 words; shorter
+        texts carry too little statistical evidence and are reported as
+        ``insufficient text''.
+  \item A document is treated as entirely human-written or entirely
+        AI-generated. Mixed authorship is outside the scope of this phase.
+  \item The heuristic stage's probability can be calibrated well enough on a
+        validation set for thresholds on it to be meaningful.
+  \item Labelled training data covering several generators and domains are
+        available from public benchmarks and can be supplemented with custom
+        generations.
+\end{enumerate}
+The system must also satisfy practical constraints: it must run on a
+CPU-only machine (with a GPU optional for speed), it must not send documents
+to external services, and its components must use openly licensed software and
+models.
+
+% ---------------------------------------------------------------------
+\section{Depiction of the Problem Statement}
+% ---------------------------------------------------------------------
+
+Fig.~\ref{fig:ipo} depicts the problem as a block diagram of inputs,
+processes and outputs. Each block is described below.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.5cm]
+  % Inputs
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize] (in1) {Document text\\(.txt, .pdf, .docx, pasted)};
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize,below=of in1] (in2) {Thresholds\\$\Tlow$, $\Thigh$, $\tau$};
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize,below=of in2] (in3) {Trained models\\(heuristic head, encoder)};
+  \node[draw,dashed,thick,fit=(in1)(in2)(in3),inner sep=6pt,
+        label={[font=\small\bfseries]above:INPUTS}] (IN) {};
+  % Processes
+  \node[blk,text width=3.6cm,font=\footnotesize,right=1.4cm of in1] (p1) {1. Pre-processing and tokenisation};
+  \node[blk,text width=3.6cm,font=\footnotesize,below=of p1] (p2) {2. Heuristic features and calibrated $p_h(d)$};
+  \node[blk,text width=3.6cm,font=\footnotesize,below=of p2] (p3) {3. Confidence gate};
+  \node[blk,text width=3.6cm,font=\footnotesize,below=of p3] (p4) {4. Transformer inference $p_t(d)$ (escalated only)};
+  \node[blk,text width=3.6cm,font=\footnotesize,below=of p4] (p5) {5. Decision, explanation and logging};
+  \node[draw,dashed,thick,fit=(p1)(p5),inner sep=6pt,
+        label={[font=\small\bfseries]above:PROCESSES}] (PR) {};
+  % Outputs
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize,right=1.4cm of p2] (o1) {Label: human / AI};
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize,below=of o1] (o2) {Calibrated probability $p(d)$};
+  \node[blk,text width=3.2cm,align=left,font=\footnotesize,below=of o2] (o3) {Route taken, latency, feature explanation};
+  \node[draw,dashed,thick,fit=(o1)(o2)(o3),inner sep=6pt,
+        label={[font=\small\bfseries]above:OUTPUTS}] (OUT) {};
+  \draw[arr] (p1) -- (p2);
+  \draw[arr] (p2) -- (p3);
+  \draw[arr] (p3) -- (p4);
+  \draw[arr] (p4) -- (p5);
+  \draw[arr] (p3.west) -- ++(-0.35,0) |- (p5.west);
+  \draw[arr,very thick] (IN.east |- p2.west) -- (PR.west |- p2.west);
+  \draw[arr,very thick] (PR.east |- o2.west) -- (OUT.west |- o2.west);
+\end{tikzpicture}
+\caption{Inputs, processes and outputs of the problem}
+\label{fig:ipo}
+\end{figure}
+
+\subsection{Inputs}
+
+The primary input is the text of a document, supplied as a plain-text file,
+a PDF or Word file from which text is extracted, or text pasted into the web
+interface. A batch input is a folder or a CSV file of documents. The secondary
+inputs are configuration values (the ambiguity band $[\Tlow,\Thigh]$ and the
+decision threshold $\tau$) and the trained artefacts: the reference language
+model used for perplexity, the heuristic classification head with its
+calibrator, and the fine-tuned transformer. Table~\ref{tab:inputs} specifies
+the inputs.
+
+\begin{table}[H]
+\caption{Specification of system inputs}
+\label{tab:inputs}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{3.4cm}|L|p{3.5cm}|}
+\hline
+\textbf{Input} & \textbf{Description} & \textbf{Constraint} \\ \hline
+Document text & Single document in English & $\ge$ 100 words recommended \\ \hline
+Batch file & Folder of files or CSV with \texttt{id}, \texttt{text} columns & UTF-8 encoded \\ \hline
+$\Tlow$, $\Thigh$ & Ambiguity band on $p_h(d)$ & $0 \le \Tlow \le \Thigh \le 1$ \\ \hline
+$\tau$ & Final decision threshold & Default 0.5 \\ \hline
+Reference LM & Small causal LM for perplexity (GPT-2 family) & Loaded locally \\ \hline
+Heuristic model & LR / GBDT head with calibrator & Serialised file \\ \hline
+Transformer model & Fine-tuned RoBERTa-base or DeBERTa-v3 & Max 512 tokens per window \\ \hline
+\end{tabularx}
+\end{table}
+
+\subsection{Processes}
+
+\textbf{Pre-processing} normalises Unicode and whitespace, removes markup,
+splits the text into sentences and tokens, and rejects inputs that are too
+short. \textbf{Heuristic scoring} computes perplexity, burstiness and
+stylometric features and passes them through the classification head and the
+calibrator to obtain $p_h(d)$. The \textbf{confidence gate} compares $p_h(d)$
+with the band: confident documents leave on the fast path, ambiguous
+documents are escalated. \textbf{Transformer inference} tokenises escalated
+documents, splits long ones into overlapping windows and aggregates the
+window probabilities into $p_t(d)$. Finally, the \textbf{decision} step
+applies $\tau$, assembles the explanation (the most influential features on
+the fast path, or the transformer probability and the heuristic context on the
+escalated path) and logs the route and latency for evaluation.
+
+\subsection{Outputs}
+
+For each document the system returns the predicted label, the calibrated
+probability $p(d)$, the route taken (fast path or escalated), the time spent in
+each stage, and an explanation. In batch mode it also writes a report with
+per-document results and summary statistics such as the escalation rate and
+throughput. Table~\ref{tab:outputs} specifies the outputs.
+
+\begin{table}[H]
+\caption{Specification of system outputs}
+\label{tab:outputs}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{3.4cm}|L|p{3.5cm}|}
+\hline
+\textbf{Output} & \textbf{Description} & \textbf{Format} \\ \hline
+Label $\hat{y}$ & Human-written or AI-generated & String / integer \\ \hline
+Probability $p(d)$ & Calibrated probability of AI authorship & Float in [0,1] \\ \hline
+Route & \texttt{fast\_path} or \texttt{escalated} & String \\ \hline
+Explanation & Top contributing features with values, or transformer score & JSON object \\ \hline
+Latency & Time in heuristic and transformer stages & Milliseconds \\ \hline
+Batch report & Per-document results and summary statistics & CSV / JSON \\ \hline
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Objectives}
+% ---------------------------------------------------------------------
+
+Guided by the research gaps above, the project pursues five objectives.
+
+\begin{enumerate}[label=\textbf{O\arabic*.},leftmargin=1.2cm,itemsep=5pt]
+\item \textbf{Heuristic baseline.} Design and implement a statistical detector
+      based on perplexity, burstiness and stylometric features (including
+      type-token ratio) with a classical machine-learning head (logistic
+      regression and gradient-boosted trees), and calibrate its output
+      probability.
+\item \textbf{Transformer baseline.} Fine-tune a transformer classifier
+      (RoBERTa-base, with DeBERTa-v3 as an alternative) on a balanced
+      human-versus-AI corpus and establish reference benchmarks for accuracy
+      and speed.
+\item \textbf{Hybrid architecture.} Develop a confidence-gated cascade that
+      returns the heuristic decision for confident documents and escalates
+      ambiguous documents to the transformer, with the ambiguity band tuned on
+      validation data.
+\item \textbf{Unified comparative evaluation.} Measure classification
+      performance (Precision, Recall, F1, AUROC) and efficiency (mean and p95
+      latency, throughput, model footprint) for the heuristic-only,
+      transformer-only and cascade systems, per generator family and in
+      aggregate, including a leave-one-generator-out test and a fairness audit
+      on non-native English writing.
+\item \textbf{System packaging.} Package the final detector as an open-source
+      command line tool and web interface suitable for institutional
+      evaluation.
+\end{enumerate}
+
+Table~\ref{tab:gap-obj} links each problem to the objectives that address it
+and to the criterion by which success is judged. The numeric targets are
+design goals that were fixed in advance of experimentation and were not
+changed afterwards; Chapter~\ref{ch:results} (Table~\ref{tab:criteria-status})
+reports which of them the implemented system meets.
+
+\begin{table}[H]
+\caption{Mapping of problems to objectives and success criteria}
+\label{tab:gap-obj}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{3.2cm}|p{1.6cm}|L|}
+\hline
+\textbf{Problem} & \textbf{Objectives} & \textbf{Success criterion (target)} \\ \hline
+P1 Black box & O1, O3, O5 & Every fast-path decision is reported with its top contributing features \\ \hline
+P2 Cost and licensing & O5 & Runs locally on open-source software with no per-document charge \\ \hline
+P3 Latency at scale & O3, O4 & Mean latency of the cascade at least 50\% below the transformer-only detector on CPU \\ \hline
+P4 Generator overfitting & O2, O4 & Cascade F1 on a held-out generator reported and compared with both baselines \\ \hline
+P5 Fairness & O3, O4 & False-positive-rate disparity $\Delta_{FPR}$ of the cascade no larger than that of the transformer-only detector \\ \hline
+Overall accuracy & O3, O4 & Cascade F1 within $\varepsilon = 0.02$ of the transformer-only detector \\ \hline
+\end{tabularx}
+\end{table}
+
+% ---------------------------------------------------------------------
+\section{Research Questions and Hypotheses}
+% ---------------------------------------------------------------------
+
+The objectives are pursued through four research questions, each paired
+with a testable hypothesis. The hypotheses were stated before any experiment
+was run; Section~\ref{sec:hypotheses} of Chapter~\ref{ch:results} reports
+whether the evidence supports or rejects each of them.
+
+\textbf{RQ1 -- Accuracy--cost trade-off.} \emph{How much of the accuracy
+advantage of a fine-tuned transformer over a heuristic detector can a
+confidence-gated cascade retain, and at what fraction of the transformer's
+average inference cost?}\\
+\textit{H1:} There exists an ambiguity band for which the cascade's F1 is
+within $\varepsilon$ of the transformer-only detector while its escalation rate
+$\alpha$ is well below 1, so that its mean latency is substantially lower.
+
+\textbf{RQ2 -- Value of calibration.} \emph{Does calibrating the heuristic
+stage improve the cascade's operating points?}\\
+\textit{H2:} For the same escalation rate, a cascade built on calibrated
+probabilities achieves higher F1 than one built on raw scores, because the
+thresholds then select documents on which the heuristic is genuinely
+uncertain.
+
+\textbf{RQ3 -- Generalisation.} \emph{How does the cascade behave on a
+generator family that was excluded from training and calibration?}\\
+\textit{H3:} Accuracy falls for all three systems on the held-out generator,
+but the escalation rate of the cascade rises, so that more of the unfamiliar
+documents are referred to the stronger model and the cascade degrades no more
+than the transformer-only detector.
+
+\textbf{RQ4 -- Fairness.} \emph{Does routing reduce the false-positive
+disparity between native and non-native English writing compared with a
+heuristic-only detector?}\\
+\textit{H4:} Because predictable but human-written essays tend to fall inside
+the ambiguity band, the cascade's $\Delta_{FPR}$ is markedly lower than that of
+the heuristic-only detector and no higher than that of the transformer-only
+detector.
+
+Fig.~\ref{fig:tradeoff} illustrates RQ1 qualitatively. The two baselines are
+the end points of the trade-off; the cascade is expected to trace a curve of
+operating points between them as the band widens, and the objective is to
+find points in the upper-left region, close to the transformer's accuracy at
+close to the heuristic's cost.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+   width=11cm,height=7.0cm,
+   xlabel={Average inference cost per document (relative)},
+   ylabel={Detection accuracy (F1, relative)},
+   xmin=0,xmax=1.1,ymin=0,ymax=1.1,
+   xtick=\empty,ytick=\empty,
+   axis lines=left,
+   clip=false]
+  \fill[pattern=north east lines,pattern color=black!40] (axis cs:0.05,0.82) rectangle (axis cs:0.45,1.02);
+  \node[font=\footnotesize,anchor=south] at (axis cs:0.25,1.03) {target region};
+  \addplot[only marks,mark=square*,mark size=3pt] coordinates {(0.08,0.45)};
+  \node[anchor=west,font=\footnotesize] at (axis cs:0.10,0.45) {heuristic only};
+  \addplot[only marks,mark=triangle*,mark size=4pt] coordinates {(1.0,0.95)};
+  \node[anchor=south east,font=\footnotesize] at (axis cs:1.02,1.0) {transformer only};
+  \addplot[thick,dashed,smooth,mark=*,mark size=1.6pt] coordinates
+      {(0.08,0.45) (0.15,0.70) (0.25,0.84) (0.38,0.91) (0.55,0.94) (0.75,0.95) (1.0,0.95)};
+  \node[anchor=north west,font=\footnotesize] at (axis cs:0.45,0.86) {cascade as the band widens};
+\end{axis}
+\end{tikzpicture}
+\caption{Qualitative accuracy--cost trade-off motivating the cascade (schematic, not measured data)}
+\label{fig:tradeoff}
+\end{figure}
+
+% ---------------------------------------------------------------------
+\section{Feasibility Study}
+% ---------------------------------------------------------------------
+
+\subsection{Technical Feasibility}
+
+All components are built from mature, openly available software and models:
+GPT-2 small for perplexity, RoBERTa-base and DeBERTa-v3-base for
+classification, scikit-learn and XGBoost for the heuristic head, and PyTorch
+with Hugging Face Transformers for neural inference~\cite{paszke2019pytorch,
+wolf2020transformers,pedregosa2011sklearn,chen2016xgboost}. Fine-tuning a
+base-sized encoder on tens of thousands of documents is routinely done on a
+single 16 GB GPU, which is available through free or low-cost cloud notebooks.
+The labelled data needed are available from public benchmarks. The project is
+therefore technically feasible within the team's resources.
+
+\subsection{Economic Feasibility}
+
+The project uses only open-source software and openly licensed models. The
+main costs are GPU time for fine-tuning, which can be met by free cloud tiers,
+and API usage for generating custom GPT-4 and Claude texts, which is limited to
+a few thousand documents. Llama generations are produced locally. Once built,
+the system has no per-document cost, in contrast with commercial detectors
+priced per licence or per page.
+
+\subsection{Operational Feasibility}
+
+The intended users interact with the system through a web page or a single
+command, and the output is a label, a probability and a short explanation in
+plain language. Deployment as a Docker container on an existing institutional
+server requires no specialised hardware. Because documents are processed
+locally, the system can be used without transferring student work to third
+parties, which removes a common obstacle to adoption.
+
+\subsection{Risks and Mitigation}
+
+\begin{table}[H]
+\caption{Project risks and mitigation measures}
+\label{tab:risks}
+\centering
+\small
+\begin{tabularx}{\textwidth}{|p{4.2cm}|L|}
+\hline
+\textbf{Risk} & \textbf{Mitigation} \\ \hline
+Heuristic stage too weak, so that the escalation rate must be very high & Add stronger single-pass features (e.g.\ conditional probability curvature~\cite{bao2024fast}); report the trade-off curve honestly \\ \hline
+Calibration drifts on unseen generators & Evaluate calibration error per generator; recalibrate on a small labelled sample from the new source \\ \hline
+Insufficient GPU time for DeBERTa-v3 & RoBERTa-base is the primary model; DeBERTa-v3 is an alternative \\ \hline
+Reference LM of the heuristic stage costs as much as the second stage, so that the cascade saves no time & Measure the cost of every stage separately; report the outcome honestly; replace the reference LM by a smaller model if needed \\ \hline
+Second-stage model is itself biased or brittle out of domain & Evaluate the transformer on out-of-distribution and fairness sets, not only on the in-distribution test split \\ \hline
+API cost of custom generations & Limit generation size; rely on public benchmarks for most training data \\ \hline
+Misuse of results as proof of misconduct & Present probabilities with explanations and an explicit advisory note; document limitations \\ \hline
+\end{tabularx}
+\end{table}
+
+\section{Summary}
+
+This chapter defined the problem addressed by \veriscript{}: building a
+detector that is simultaneously accurate, inexpensive, explainable, robust and
+fair. The problem was stated formally as the choice of an ambiguity band that
+minimises expected inference cost subject to an accuracy constraint relative
+to the transformer-only detector and a fairness constraint. The inputs,
+processes and outputs were specified, and five objectives with measurable
+success criteria were set. The next chapter presents the methodology by which
+these objectives will be met.
