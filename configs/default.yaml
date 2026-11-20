@@ -1,0 +1,43 @@
+# VeriScript run-time configuration.
+# Paths are relative to the project root (or to $VERISCRIPT_HOME when set).
+
+device: auto                 # auto | cpu | cuda
+seed: 42
+
+preprocess:
+  min_words: 100             # shorter documents are reported as "insufficient text"
+
+reference_lm:
+  name: gpt2                 # GPT-2 small, ~124M parameters
+  max_tokens: 2048           # documents are scored in chunks of 1024 tokens, up to this many
+  min_sentence_tokens: 5     # sentences shorter than this are ignored for sentence perplexity
+
+heuristic:
+  model_path: models/heuristic/heuristic.joblib
+
+transformer:
+  model_dir: models/transformer/roberta-base
+  max_len: 512
+  stride: 384                # step between window starts (tokens)
+  batch_size: 16             # windows per forward pass at inference
+
+gate:
+  tau: 0.5                   # final decision threshold
+  operating_point: balanced  # fast | balanced | thorough | custom
+  t_low: 0.10                # used only when operating_point == custom
+  t_high: 0.90
+
+# Written by `python -m train.tune_thresholds`; values below are fall-backs until tuning has run.
+operating_points_path: models/operating_points.json
+operating_points:
+  fast:      {t_low: 0.25, t_high: 0.80}
+  balanced:  {t_low: 0.10, t_high: 0.90}
+  thorough:  {t_low: 0.03, t_high: 0.97}
+
+explain:
+  top_k: 5
+  note: "Probabilistic estimate; review before acting on it."
+
+logging:
+  enabled: false             # NFR3: documents are not stored unless enabled
+  path: reports/runs/results.jsonl
