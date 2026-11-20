@@ -137,22 +137,25 @@ def markdown_report(R: dict) -> str:
             L.append(f"| {k} | {fmt(v['fpr_native'], 3)} | {fmt(v['fpr_non_native'], 3)} | {fmt(v['delta_fpr'], 3)} |")
         L.append("")
     if R.get("per_generator"):
-        L.append("## Per generator family (test split; F1 on family AI + all humans)")
+        L.append("## Per generator family (test split): detection rate (recall) on that family's AI texts")
         L.append("")
         systems = list(next(iter(R["per_generator"].values())).keys())
         L.append("| Family | n AI | " + " | ".join(systems) + " |")
         L.append("|---|---|" + "---|" * len(systems))
         for fam, v in R["per_generator"].items():
             n = next(iter(v.values()))["n_ai"]
-            L.append(f"| {fam} | {n} | " + " | ".join(fmt(v[s]['f1']) for s in systems) + " |")
+            L.append(f"| {fam} | {n} | " + " | ".join(fmt(v[s]['recall']) for s in systems) + " |")
         L.append("")
     if R.get("logo_heuristic"):
         L.append("## Leave-one-generator-out (heuristic stage retrained without each family)")
         L.append("")
-        L.append("| Held-out family | F1 (LOGO) | F1 (trained with family) | Recall (LOGO) |")
-        L.append("|---|---|---|---|")
+        L.append("Recall on the held-out family's AI texts in `test`; F1 on those texts + all test humans.")
+        L.append("")
+        L.append("| Held-out family | n AI | Recall (LOGO) | F1 (LOGO) | F1 (trained with family) | Transformer F1 (LOGO) | Cascade thorough F1 (LOGO) |")
+        L.append("|---|---|---|---|---|---|---|")
         for fam, v in R["logo_heuristic"].items():
-            L.append(f"| {fam} | {fmt(v['f1_logo'])} | {fmt(v['f1_in'])} | {fmt(v['recall_logo'])} |")
+            L.append(f"| {fam} | {v['n_ai']} | {fmt(v['recall_logo'])} | {fmt(v['f1_logo'])} | {fmt(v['f1_in'])} | "
+                     f"{fmt(v.get('f1_transformer'))} | {fmt(v.get('f1_cascade_thorough'))} |")
         L.append("")
     if R.get("calibration_ablation"):
         L.append("## Calibration ablation (RQ2, val split): cascade F1 at matched escalation rate")
@@ -188,13 +191,43 @@ def markdown_report(R: dict) -> str:
     return "\n".join(L)
 
 
+def _plot_tradeoff_from(R: dict) -> None:
+    """Trade-off curve (Eq. 4.7). A standalone transformer costs C_t, i.e. C_t / (C_h + C_t) on this axis."""
+    c = R["stage_costs_ms"]
+    tf1 = R["splits"]["val"]["metrics"]
+    tot = c["heuristic"] + c["transformer"]
+    plot_tradeoff(R["tradeoff_curve"], {
+        "heuristic only": (c["heuristic"] / tot, tf1["heuristic"]["f1"]),
+        "transformer only (standalone)": (c["transformer"] / tot, tf1["transformer"]["f1"]),
+        "cascade, all escalated": (1.0, tf1["transformer"]["f1"]),
+    }, FIG / "tradeoff_val.png", {k: tuple(v) for k, v in R["tradeoff_chosen"].items()})
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
+    ap.add_argument("--render-only", action="store_true", help="re-render results.md from results.json")
     ap.add_argument("--latency-docs", type=int, default=200)
     ap.add_argument("--devices", nargs="*", default=["cpu", "cuda"])
     ap.add_argument("--no-latency", action="store_true")
     ap.add_argument("--n-boot", type=int, default=1000)
     args = ap.parse_args(argv)
+    if args.render_only:
+        R = json.loads((REPORTS / "results.json").read_text())
+        if "stage_costs_ms" not in R and R.get("latency"):
+            d0 = R["latency"].get("cpu") or next(iter(R["latency"].values()))
+            R["stage_costs_ms"] = {"heuristic": d0["heuristic"]["mean_ms"], "transformer": d0["transformer"]["mean_ms"]}
+            val_m = R["splits"]["val"]["metrics"]
+            tot = sum(R["stage_costs_ms"].values())
+            # escalation rates of the operating points on val
+            esc = R["splits"]["val"]["escalation"]
+            R["tradeoff_chosen"] = {op: ((R["stage_costs_ms"]["heuristic"] + esc[op] * R["stage_costs_ms"]["transformer"]) / tot,
+                                         val_m[f"cascade_{op}"]["f1"]) for op in R["operating_points"]}
+            write_json(R, REPORTS / "results.json")
+        if R.get("tradeoff_curve"):
+            FIG.mkdir(parents=True, exist_ok=True)
+            _plot_tradeoff_from(R)
+        (REPORTS / "results.md").write_text(markdown_report(R), encoding="utf-8")
+        return
     FIG.mkdir(parents=True, exist_ok=True)
     cfg = load_config()
     tau = cfg["gate"]["tau"]
@@ -310,8 +343,9 @@ def main(argv=None):
         for op, pt in points.items():
             a = float(ConfidenceGate(pt["t_low"], pt["t_high"]).escalate_mask(val.p_h.values).mean())
             chosen[op] = ((c_h + a * c_t) / (c_h + c_t), tf1[f"cascade_{op}"]["f1"])
-        plot_tradeoff(curve, {"heuristic only": (c_h / (c_h + c_t), tf1["heuristic"]["f1"]), "transformer only": (1.0, tf1["transformer"]["f1"])},
-                      FIG / "tradeoff_val.png", chosen)
+        R["tradeoff_chosen"] = chosen
+        R["stage_costs_ms"] = {"heuristic": c_h, "transformer": c_t}
+        _plot_tradeoff_from(R)
 
     write_json(R, REPORTS / "results.json")
     (REPORTS / "results.md").write_text(markdown_report(R), encoding="utf-8")

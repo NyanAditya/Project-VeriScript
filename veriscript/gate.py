@@ -96,11 +96,17 @@ def tune_band(
     fair_p_h=None,
     fair_p_t=None,
     fair_native=None,
+    fairness: str = "worst_group",
 ) -> dict:
     """Algorithm 4.3: the band with the lowest escalation rate subject to
-    F1_cascade >= F1_transformer - eps and Delta-FPR <= delta.
+    F1_cascade >= F1_transformer - eps and a fairness constraint on the native / non-native set.
 
-    If ``delta`` is None it defaults to the transformer-only disparity (success criterion P5).
+    fairness:
+      ``worst_group`` (default) - FPR on non-native writing no higher than the transformer-only
+                                  detector's (hypothesis H4). Cannot be met by raising native FPR.
+      ``disparity``             - Delta-FPR <= delta (success criterion P5 as stated in the report);
+                                  ``delta`` defaults to the transformer-only disparity + 1 SE.
+      ``none``                  - accuracy constraint only.
     Ties in escalation rate are broken by higher F1.
     """
     grid = evaluate_bands(p_h, p_t, y, tau, step, fair_p_h, fair_p_t, fair_native)
@@ -111,11 +117,21 @@ def tune_band(
     if "delta_fpr" in grid:
         fp = np.asarray(fair_p_t) >= tau
         native = np.asarray(fair_native, bool)
-        d_t = float(fp[~native].mean() - fp[native].mean()) if native.any() and (~native).any() else 0.0
+        fpr_nn_t = float(fp[~native].mean()) if (~native).any() else 0.0
+        fpr_n_t = float(fp[native].mean()) if native.any() else 0.0
+        d_t = fpr_nn_t - fpr_n_t
+        # Fairness sets are small, so the transformer's disparity is itself uncertain. By default the
+        # cascade may exceed it by one standard error of that estimate (difference of two proportions).
+        se = float(np.sqrt(fpr_nn_t * (1 - fpr_nn_t) / max((~native).sum(), 1) + fpr_n_t * (1 - fpr_n_t) / max(native.sum(), 1)))
         if delta is None:
-            delta = max(d_t, 0.0)
-        ok &= grid["delta_fpr"] <= delta + 1e-12
-        fair_info = {"delta_fpr_transformer": d_t, "delta": delta}
+            delta = max(d_t, 0.0) + se
+        if fairness == "disparity":
+            ok &= grid["delta_fpr"] <= delta + 1e-12
+        if fairness in ("disparity", "worst_group"):
+            # H4: never flag non-native writers more often than the transformer-only detector.
+            ok &= grid["fpr_non_native"] <= fpr_nn_t + 1e-12
+        fair_info = {"fairness": fairness, "delta_fpr_transformer": d_t, "delta_se": se, "delta": delta,
+                     "fpr_non_native_transformer": fpr_nn_t, "fpr_native_transformer": fpr_n_t}
     if not ok.any():
         # Fall back to the transformer-only band (always feasible for accuracy).
         i, j = 0, grid["t_high"].shape[1] - 1
@@ -138,6 +154,8 @@ def tune_band(
     }
     if "delta_fpr" in grid:
         res["delta_fpr_cascade"] = float(grid["delta_fpr"][i, j])
+        res["fpr_non_native_cascade"] = float(grid["fpr_non_native"][i, j])
+        res["fpr_native_cascade"] = float(grid["fpr_native"][i, j])
     return res
 
 

@@ -1,0 +1,48 @@
+{
+  "base_model": "roberta-base",
+  "exclude_family": null,
+  "n_train": 200,
+  "lr": 2e-05,
+  "epochs": 1.0,
+  "val": {
+    "eval_loss": 0.6923405528068542,
+    "eval_f1": 0.0,
+    "eval_auroc": 0.7862121380639898,
+    "eval_runtime": 38.6122,
+    "eval_samples_per_second": 103.491,
+    "eval_steps_per_second": 3.237,
+    "epoch": 0.96
+  },
+  "n_parameters": 124647170,
+  "log_history": [
+    {
+      "eval_loss": 0.6923405528068542,
+      "eval_f1": 0.0,
+      "eval_auroc": 0.7862121380639898,
+      "eval_runtime": 20.3416,
+      "eval_samples_per_second": 196.445,
+      "eval_steps_per_second": 6.145,
+      "epoch": 0.96,
+      "step": 12
+    },
+    {
+      "train_runtime": 29.4408,
+      "train_samples_per_second": 6.793,
+      "train_steps_per_second": 0.408,
+      "total_flos": 47388767736480.0,
+      "train_loss": 0.6953748067220052,
+      "epoch": 0.96,
+      "step": 12
+    },
+    {
+      "eval_loss": 0.6923405528068542,
+      "eval_f1": 0.0,
+      "eval_auroc": 0.7862121380639898,
+      "eval_runtime": 38.6122,
+      "eval_samples_per_second": 103.491,
+      "eval_steps_per_second": 3.237,
+      "epoch": 0.96,
+      "step": 12
+    }
+  ]
+}
