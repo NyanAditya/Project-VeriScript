@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -17,18 +18,28 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 API = os.environ.get("VERISCRIPT_API_URL", "http://127.0.0.1:8000").rstrip("/")
+DEMO = os.environ.get("VERISCRIPT_DEMO", "") == "1"   # public hosted demo (e.g. Hugging Face Spaces)
 
 st.set_page_config(page_title="VeriScript", layout="centered")
 
 
-@st.cache_resource(show_spinner="Loading models ...")
+@st.cache_resource(show_spinner="Loading models (first visit after a restart takes about a minute) ...")
 def local_detector():
     from veriscript.cascade import CascadeDetector
 
     return CascadeDetector.from_config()
 
 
+@st.cache_resource
+def detector_lock():
+    # One detector is shared by all sessions; serialise use so that one visitor's mode
+    # cannot change the thresholds while another visitor's document is being scored.
+    return threading.Lock()
+
+
 def api_up() -> bool:
+    if not API:
+        return False
     try:
         return requests.get(f"{API}/api/v1/health", timeout=2).ok
     except requests.RequestException:
@@ -50,23 +61,38 @@ def run_detection(text: str | None, upload, mode: str) -> dict:
     det = local_detector()
     if upload is not None:
         text = extract_bytes(upload.getvalue(), upload.name)
-    prev = (det.gate, det.operating_point)
-    try:
-        det.set_operating_point(mode)
-        return det.detect(text).to_json()
-    finally:
-        det.gate, det.operating_point = prev
+    with detector_lock():
+        prev = (det.gate, det.operating_point)
+        try:
+            det.set_operating_point(mode)
+            return det.detect(text).to_json()
+        finally:
+            det.gate, det.operating_point = prev
 
 
 st.title("VeriScript")
 st.caption("Hybrid heuristic-transformer detector of AI-generated text. "
            "The score is a probability, not proof. Review it before acting on it.")
 
+if DEMO:
+    st.warning("**Public demo.** Text you submit is processed on this server and is not stored, "
+               "but do not paste confidential documents or real student work. Results are for "
+               "demonstration only and must not be used to judge anyone's work.")
+
 mode = st.radio("Mode", ["fast", "balanced", "thorough"], index=1, horizontal=True,
                 help="fast: escalates fewest documents to the transformer; thorough: escalates most.")
 tab_text, tab_file = st.tabs(["Paste text", "Upload file"])
 with tab_text:
-    text = st.text_area("Document text", height=260, placeholder="Paste at least 100 words of English prose ...")
+    from app.examples import AI as EXAMPLE_AI, HUMAN as EXAMPLE_HUMAN
+
+    e1, e2, _ = st.columns([1, 1, 2])
+    if e1.button("Example: human text"):
+        st.session_state["doc_text"] = EXAMPLE_HUMAN
+    if e2.button("Example: AI text"):
+        st.session_state["doc_text"] = EXAMPLE_AI
+    text = st.text_area("Document text", height=260, key="doc_text",
+                        placeholder="Paste at least 100 words of English prose ...")
+    st.caption("Examples: held-out answers from the HC3 dataset (CC BY-SA 4.0).")
 with tab_file:
     upload = st.file_uploader("A .txt, .pdf or .docx file", type=["txt", "pdf", "docx"])
 

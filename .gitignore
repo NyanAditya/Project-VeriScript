@@ -10,3 +10,7 @@ reports/runs/
 *.log
 .env
 .claude/
+
+# Local-only files
+CLAUDE.md
+Project-Onboarding/
