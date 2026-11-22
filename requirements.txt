@@ -1,0 +1,23 @@
+# Local development environment, CPU-only (no NVIDIA GPU needed). Python 3.11.
+#   py -3.11 -m venv .venv
+#   .venv\Scripts\python -m pip install -r requirements.txt
+#
+# Packages that touch the trained models are pinned to the versions the models were built with
+# (the heuristic head is a pickled scikit-learn / XGBoost object). Same pins as deploy/hf_space.
+# Everything else comes from pyproject.toml via the editable install at the bottom.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+transformers==4.46.3
+huggingface_hub==0.36.2
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.17.1
+scikit-learn==1.5.2
+xgboost==2.1.3
+joblib==1.6.0
+spacy==3.8.2
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+streamlit==1.40.2
+
+# The veriscript package itself (+ FastAPI, Typer CLI, datasets, pytest, ...).
+-e .[dev]
